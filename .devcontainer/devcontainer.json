@@ -10,17 +10,13 @@
           "username": "vscode",
           "uid": "1000",
           "gid": "1000",
-          "upgradePackages": "true", // Update packages during build
+          "upgradePackages": "true",
           "configureGo": "false"
       }
   },
 
-  // Run these commands AFTER the container is created and features are installed
-  // This will install needed libs, clone Flutter, and set up the PATH for bash
-  "postCreateCommand": "sudo apt-get update && sudo apt-get install -y libstdc++6 zlib1g && git clone https://github.com/flutter/flutter.git --depth 1 --branch stable /usr/local/flutter && echo 'export PATH=\"$PATH:/usr/local/flutter/bin\"' >> ~/.bashrc",
-
-  // Optional: You can uncomment this to run flutter doctor automatically every time you connect
-  // "postAttachCommand": "flutter doctor -v",
+  // UPDATED postCreateCommand: Clones Flutter into /workspaces/flutter-sdk
+  "postCreateCommand": "sudo apt-get update && sudo apt-get install -y libstdc++6 zlib1g && git clone https://github.com/flutter/flutter.git --depth 1 --branch stable /workspaces/flutter-sdk && echo 'export PATH=\"$PATH:/workspaces/flutter-sdk/bin\"' >> ~/.bashrc",
 
   "customizations": {
     "vscode": {
