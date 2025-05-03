@@ -1,16 +1,20 @@
 {
-  "name": "Ubuntu Base Test",
+  "name": "Flutter Dev Container", // Updated name
   "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
-  // Remove the "features" section for now
-  // Remove the "postCreateCommand" for now
+  "features": {
+    // Re-add the Flutter feature section
+    "ghcr.io/devcontainers/features/flutter:1": {}
+  },
   "customizations": {
     "vscode": {
       "extensions": [
-        "Dart-Code.flutter", // Keep extensions, they don't affect the build
+        "Dart-Code.flutter",
         "Dart-Code.dart-code"
       ]
     }
   },
+  // Optional: Add back postCreateCommand to auto-run flutter doctor after builds
+  "postCreateCommand": "flutter doctor -v",
   "terminal.integrated.defaultProfile.linux": "bash",
   "terminal.integrated.profiles.linux": {
     "bash": {
