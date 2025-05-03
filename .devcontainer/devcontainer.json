@@ -1,0 +1,40 @@
+{
+    "name": "Flutter Dev Container",
+    // Use a base Ubuntu image
+    "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  
+  
+    "features": {
+      // Install Flutter and Dart
+      "ghcr.io/devcontainers/features/flutter:1": {}
+    },
+  
+  
+    // Install useful VS Code extensions
+    "customizations": {
+      "vscode": {
+        "extensions": [
+          "Dart-Code.flutter",
+          "Dart-Code.dart-code"
+          // Add other extensions you like, e.g., GitLens, Prettier
+        ]
+      }
+    },
+  
+  
+    // Forward ports for Flutter web/debugging if needed
+    // "forwardPorts": [3000],
+  
+  
+    // Run basic setup commands after container creation
+    "postCreateCommand": "flutter doctor -v",
+  
+  
+    // Use bash as the default shell
+    "terminal.integrated.defaultProfile.linux": "bash",
+    "terminal.integrated.profiles.linux": {
+      "bash": {
+        "path": "/bin/bash"
+      }
+    }
+  }
