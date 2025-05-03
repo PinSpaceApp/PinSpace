@@ -1,10 +1,27 @@
 {
-  "name": "Flutter Dev Container", // Updated name
-  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "name": "Flutter Manual Install Dev Container",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu", // Use the working base Ubuntu image
+
   "features": {
-    // Re-add the Flutter feature section
-    "ghcr.io/devcontainers/features/flutter:1": {}
+      // Use common-utils to ensure git is installed and packages are updated
+      "ghcr.io/devcontainers/features/common-utils:2": {
+          "installZsh": "false",
+          "installOhMyZsh": "false",
+          "username": "vscode",
+          "uid": "1000",
+          "gid": "1000",
+          "upgradePackages": "true", // Update packages during build
+          "configureGo": "false"
+      }
   },
+
+  // Run these commands AFTER the container is created and features are installed
+  // This will install needed libs, clone Flutter, and set up the PATH for bash
+  "postCreateCommand": "sudo apt-get update && sudo apt-get install -y libstdc++6 zlib1g && git clone https://github.com/flutter/flutter.git --depth 1 --branch stable /usr/local/flutter && echo 'export PATH=\"$PATH:/usr/local/flutter/bin\"' >> ~/.bashrc",
+
+  // Optional: You can uncomment this to run flutter doctor automatically every time you connect
+  // "postAttachCommand": "flutter doctor -v",
+
   "customizations": {
     "vscode": {
       "extensions": [
@@ -13,8 +30,6 @@
       ]
     }
   },
-  // Optional: Add back postCreateCommand to auto-run flutter doctor after builds
-  "postCreateCommand": "flutter doctor -v",
   "terminal.integrated.defaultProfile.linux": "bash",
   "terminal.integrated.profiles.linux": {
     "bash": {
