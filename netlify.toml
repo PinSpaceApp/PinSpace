@@ -1,23 +1,25 @@
-    # netlify.toml - Configuration for Netlify builds
+# netlify.toml - Configuration for Netlify builds
 
-    [build]
-      # Base directory: The subdirectory where your Flutter project lives
-      base = "pinspace_app/"
+[build]
+  # Base directory: The subdirectory where your Flutter project lives
+  base = "pinspace_app/"
 
-      # Build command: How to build the Flutter web app
-      command = "flutter build web --release"
+  # Build command:
+  # 1. Clone the stable Flutter SDK into a temporary directory ($HOME/flutter)
+  # 2. Add the Flutter bin directory to the PATH for this build script
+  # 3. (Optional) Run flutter doctor to verify and pre-download tools
+  # 4. Run the actual Flutter web build command
+  command = "git clone https://github.com/flutter/flutter.git --depth 1 --branch stable $HOME/flutter && export PATH=\"$PATH:$HOME/flutter/bin\" && flutter doctor && flutter build web --release"
 
-      # Publish directory: Where the built files are located (relative to 'base')
-      publish = "build/web/"
+  # Publish directory: Where the built files are located (relative to 'base')
+  publish = "build/web/"
 
-    # Optional: Specify environment settings if needed
-    # [build.environment]
-    #   FLUTTER_VERSION = "3.29.3" # You can still specify version here if needed
+# Optional: Specify environment settings if needed (usually not needed if cloning)
+# [build.environment]
+#   FLUTTER_VERSION = "3.x.x"
 
-    # Redirects and rewrites for single-page apps (SPA) like Flutter web
-    # This ensures direct links to routes like /login work correctly
-    [[redirects]]
-      from = "/*"
-      to = "/index.html"
-      status = 200
-    
+# Redirects and rewrites for single-page apps (SPA) like Flutter web
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
