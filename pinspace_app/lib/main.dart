@@ -1,64 +1,53 @@
 // lib/main.dart
 
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart'; // Import Supabase
-import 'package:flutter_dotenv/flutter_dotenv.dart';   // Import dotenv
-import 'auth_gate.dart';                                // Import your AuthGate widget
-import 'theme/app_theme.dart';                          // Import your AppTheme class
+import 'package:supabase_flutter/supabase_flutter.dart';
+// import 'package:flutter_dotenv/flutter_dotenv.dart'; // No longer needed
+import 'auth_gate.dart';
+import 'theme/app_theme.dart';
 
-// --- Asynchronous main function ---
+// --- Compile-time variables from --dart-define ---
+// Use const String.fromEnvironment to read the values passed during build
+const String supabaseUrl = String.fromEnvironment('SUPABASE_URL');
+const String supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY');
+
+
 Future<void> main() async {
-  // Ensure Flutter bindings are initialized before using plugins
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Load environment variables from the .env file
-  // Make sure '.env' is declared in pubspec.yaml assets
-  await dotenv.load(fileName: ".env");
+  // --- Check if variables were passed ---
+  if (supabaseUrl.isEmpty || supabaseAnonKey.isEmpty) {
+    // Handle error - variables weren't passed during build
+    // This might happen during local development if you don't pass them
+    print('ERROR: SUPABASE_URL or SUPABASE_ANON_KEY not passed via --dart-define.');
+    print('Ensure they are set in your build environment (e.g., Netlify UI).');
+    // Optionally, you could fall back to dotenv for local dev,
+    // but it's better to pass them locally too via flutter run --dart-define=...
+    // For now, we'll just initialize with empty strings which will likely fail later
+    // await dotenv.load(fileName: ".env"); // Fallback removed for clarity
+  }
 
-  // Initialize Supabase client
-  // Reads URL and anon key from the loaded .env variables
+  // Initialize Supabase using compile-time variables
   await Supabase.initialize(
-    url: dotenv.env['SUPABASE_URL']!,
-    anonKey: dotenv.env['SUPABASE_ANON_KEY']!,
+    url: supabaseUrl,
+    anonKey: supabaseAnonKey,
   );
 
-  // Run the Flutter application
-  runApp(const MyApp()); // MyApp itself can be const
+  runApp(const MyApp());
 }
 
-// --- Global Supabase client instance (optional convenience) ---
-// You can access the client anywhere using Supabase.instance.client
-// This global variable is just another way to access it if preferred.
 final supabase = Supabase.instance.client;
 
-// --- Root Application Widget ---
 class MyApp extends StatelessWidget {
-  // Constructor for MyApp
-  const MyApp({super.key});
+   const MyApp({super.key});
 
-  @override
-  Widget build(BuildContext context) {
-    // MaterialApp is the root of your UI
-    return MaterialApp(
-      title: 'PinSpace', // The title of your app
-
-      // Apply the custom light theme defined in theme/app_theme.dart
-      theme: AppTheme.lightTheme,
-
-      // Optionally define dark theme and theme mode later
-      // darkTheme: AppTheme.darkTheme,
-      // themeMode: ThemeMode.system,
-
-      // The initial route/widget for the app is AuthGate,
-      // which handles routing based on login status.
-      // REMOVED 'const' because AuthGate is a StatefulWidget
-      home: AuthGate(),
-
-      // Hide the debug banner in the top-right corner
-      debugShowCheckedModeBanner: false,
-    );
-  }
+   @override
+   Widget build(BuildContext context) {
+     return MaterialApp(
+       title: 'PinSpace',
+       theme: AppTheme.lightTheme,
+       home: AuthGate(),
+       debugShowCheckedModeBanner: false,
+     );
+   }
 }
-
-// Note: The default MyHomePage counter widget has been removed,
-// as AuthGate now controls the initial screen.

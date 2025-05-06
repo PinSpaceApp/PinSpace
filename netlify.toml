@@ -1,25 +1,35 @@
 # netlify.toml - Configuration for Netlify builds
+# Place this file in the root of your GitHub repository
 
 [build]
   # Base directory: The subdirectory where your Flutter project lives
+  # Netlify will change directory into this folder before running the command.
   base = "pinspace_app/"
 
   # Build command:
-  # 1. Clone the stable Flutter SDK into a temporary directory ($HOME/flutter)
-  # 2. Add the Flutter bin directory to the PATH for this build script
-  # 3. (Optional) Run flutter doctor to verify and pre-download tools
-  # 4. Run the actual Flutter web build command
-  command = "git clone https://github.com/flutter/flutter.git --depth 1 --branch stable $HOME/flutter && export PATH=\"$PATH:$HOME/flutter/bin\" && flutter doctor && flutter build web --release"
+  # 1. Clone the stable Flutter SDK into a temporary directory ($HOME/flutter) in the build environment.
+  # 2. Add the Flutter bin directory to the PATH for this build script.
+  # 3. Run flutter doctor to ensure SDK setup and download necessary build tools.
+  # 4. Run the actual Flutter web build command in release mode.
+  # 5. Pass Netlify environment variables (SUPABASE_URL, SUPABASE_ANON_KEY)
+  #    into the Flutter build using --dart-define. Your main.dart must use
+  #    String.fromEnvironment('VARIABLE_NAME') to read these.
+  command = "git clone https://github.com/flutter/flutter.git --depth 1 --branch stable $HOME/flutter && export PATH=\"$PATH:$HOME/flutter/bin\" && flutter doctor && flutter build web --release --dart-define=SUPABASE_URL=$SUPABASE_URL --dart-define=SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY"
 
-  # Publish directory: Where the built files are located (relative to 'base')
+  # Publish directory: Where the built web files are located (relative to the 'base' directory)
+  # This should point to the output of the 'flutter build web' command.
   publish = "build/web/"
 
-# Optional: Specify environment settings if needed (usually not needed if cloning)
+# Optional: Specify build environment settings if needed
+# Usually not required if cloning Flutter as above, but can be used to pin versions.
 # [build.environment]
-#   FLUTTER_VERSION = "3.x.x"
+#   FLUTTER_VERSION = "3.x.x" # Example: Specify Flutter version if auto-detection fails
+#   NODE_VERSION = "18"       # Example: Specify Node version if needed by build steps
 
-# Redirects and rewrites for single-page apps (SPA) like Flutter web
+# Redirects and rewrites for single-page applications (SPA) like Flutter web
+# This rule ensures that navigating directly to a path like yoursite.netlify.app/login
+# still loads the main index.html file, allowing Flutter's router to handle it.
 [[redirects]]
   from = "/*"
   to = "/index.html"
-  status = 200
+  status = 200 # Use 200 for SPAs to handle routing client-side
