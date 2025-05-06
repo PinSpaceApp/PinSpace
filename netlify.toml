@@ -1,0 +1,23 @@
+    # netlify.toml - Configuration for Netlify builds
+
+    [build]
+      # Base directory: The subdirectory where your Flutter project lives
+      base = "pinspace_app/"
+
+      # Build command: How to build the Flutter web app
+      command = "flutter build web --release"
+
+      # Publish directory: Where the built files are located (relative to 'base')
+      publish = "build/web/"
+
+    # Optional: Specify environment settings if needed
+    # [build.environment]
+    #   FLUTTER_VERSION = "3.29.3" # You can still specify version here if needed
+
+    # Redirects and rewrites for single-page apps (SPA) like Flutter web
+    # This ensures direct links to routes like /login work correctly
+    [[redirects]]
+      from = "/*"
+      to = "/index.html"
+      status = 200
+    
