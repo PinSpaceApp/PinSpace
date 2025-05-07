@@ -57,7 +57,7 @@ class _TwinklingBackgroundState extends State<TwinklingBackground>
         Container(
           decoration: const BoxDecoration(
             image: DecorationImage(
-              image: AssetImage('images/LoginScreenBackground.jpg'),
+              image: AssetImage('assets/images/LoginScreenBackground.jpg'),
               fit: BoxFit.cover,
             ),
           ),

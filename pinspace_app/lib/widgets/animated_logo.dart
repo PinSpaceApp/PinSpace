@@ -65,7 +65,7 @@ class _AnimatedLogoState extends State<AnimatedLogo> with SingleTickerProviderSt
           width: widget.size,
           child: Image.asset(
             // Make sure this path matches your pubspec.yaml and file location
-            'images/Logo.png',
+            'assets/images/Logo.png',
             // Optional: Add semantic label for accessibility
             semanticLabel: 'PinSpace Logo',
             // Optional: Add error builder if image fails to load
