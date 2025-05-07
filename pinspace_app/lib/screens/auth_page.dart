@@ -49,7 +49,7 @@ class AuthPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // No AppBar here for a cleaner look
+      // No AppBar here for a cleaner look, navigation handled by Navigator stack
       body: Stack( // Use Stack to layer background and UI
         children: [
           // --- Twinkling Background (Includes image) ---
@@ -93,6 +93,7 @@ class AuthPage extends StatelessWidget {
                       );
                     },
                      // Style comes from theme
+                     // Example override: style: ElevatedButton.styleFrom(minimumSize: const Size(200, 50)),
                   ),
                   const SizedBox(height: 15),
 
@@ -101,7 +102,6 @@ class AuthPage extends StatelessWidget {
                     icon: const Icon(Icons.person_add_alt_1),
                     label: const Text('Sign Up'),
                     onPressed: () {
-                      // *** UPDATED NAVIGATION ***
                       // Navigate to the SignUpPage
                       Navigator.push(
                         context,
@@ -110,6 +110,7 @@ class AuthPage extends StatelessWidget {
                       print('Navigating to Sign Up page...');
                     },
                      // Style comes from theme
+                     // Example override: style: ElevatedButton.styleFrom(minimumSize: const Size(200, 50)),
                   ),
                   const SizedBox(height: 30),
 
