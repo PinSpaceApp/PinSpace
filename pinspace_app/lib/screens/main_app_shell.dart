@@ -1,11 +1,11 @@
 // lib/screens/main_app_shell.dart
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart'; // Import material for kToolbarHeight
 import 'dashboard_page.dart';
 import 'my_pins_page.dart';
 import 'scanner_page.dart';
 import 'community_page.dart';
-import 'marketplace_page.dart';
-import '../theme/app_colors.dart'; // Import theme colors
+import 'marketplace_page.dart'; // Renamed to Pin Market Page later if needed
+import '../theme/app_colors.dart';
 
 class MainAppShell extends StatefulWidget {
   const MainAppShell({super.key});
@@ -15,54 +15,42 @@ class MainAppShell extends StatefulWidget {
 }
 
 class _MainAppShellState extends State<MainAppShell> {
-  int _selectedIndex = 0; // Index for the currently selected tab (excluding FAB)
-  final PageController _pageController = PageController(); // Controller for page view
+  int _selectedIndex = 0;
+  final PageController _pageController = PageController();
+  final TextEditingController _searchController = TextEditingController();
 
   // List of the pages for the main sections (excluding Scanner)
-  // Order matches the BottomAppBar icons
   static const List<Widget> _widgetOptions = <Widget>[
-    DashboardPage(),
-    MyPinsPage(),
-    // Index 2 is now handled by the FAB
-    CommunityPage(),
-    MarketplacePage(),
+    DashboardPage(),    // Corresponds to 'Dashboard' icon
+    MyPinsPage(),       // Corresponds to 'My Pins' icon
+    CommunityPage(),    // Corresponds to 'Community' icon
+    MarketplacePage(),  // Corresponds to 'Pin Market' icon
   ];
 
-  // Handler for when a BottomAppBar item is tapped
   void _onItemTapped(int index) {
     setState(() {
       _selectedIndex = index;
-      // Animate page transition
-      _pageController.animateToPage(
-        index,
-        duration: const Duration(milliseconds: 250),
-        curve: Curves.easeInOut,
-      );
+      _pageController.jumpToPage(index);
     });
   }
 
-  // Handler for the Floating Action Button (Scanner)
   void _onScannerButtonPressed() {
     print('Scanner FAB tapped!');
-    // Option 1: Navigate to a dedicated Scanner Page
     Navigator.push(
       context,
       MaterialPageRoute(builder: (context) => const ScannerPage()),
     );
-    // Option 2: Show a Modal Bottom Sheet for scanning
-    // showModalBottomSheet(...);
-    // Option 3: Directly trigger camera if ScannerPage is simple enough
   }
 
-  // Placeholder action for top bar icons
   void _onTopIconPressed(String iconName) {
     print('$iconName icon pressed!');
-    // TODO: Navigate to Profile, Messages, or Notifications screen
+    // TODO: Navigation
   }
 
   @override
   void dispose() {
-    _pageController.dispose(); // Dispose the controller
+    _pageController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -70,102 +58,162 @@ class _MainAppShellState extends State<MainAppShell> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final safeAreaTopPadding = MediaQuery.of(context).padding.top;
+
+    // Define Heights
+    const double standardAppBarHeight = kToolbarHeight;
+    const double extraAppBarHeight = 24.0;
+    const double totalAppBarAreaHeight = standardAppBarHeight + extraAppBarHeight;
+    const double searchBarHeight = 48.0;
+
+    // Define the custom color from hex
+    const Color customAppBarColor = Color(0xFF62a3f7);
 
     return Scaffold(
-      // --- Updated AppBar with Search Bar ---
-      appBar: AppBar(
-        elevation: 1,
-        // Custom title widget containing the search bar
-        title: Container(
-          height: 40, // Adjust height as needed
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surface, // Or slightly different color
-            borderRadius: BorderRadius.circular(20), // Rounded corners
-          ),
-          child: TextField(
-            // controller: _searchController, // Add controller later
-            // onChanged: _handleSearch, // Add search logic later
-            decoration: InputDecoration(
-              hintText: 'Search pins, sets, traders...',
-              hintStyle: TextStyle(color: theme.hintColor.withOpacity(0.6)),
-              prefixIcon: Icon(Icons.search, color: theme.iconTheme.color?.withOpacity(0.8)),
-              // Optionally add a filter icon button at the end
-              // suffixIcon: IconButton(
-              //   icon: Icon(Icons.filter_list, color: theme.iconTheme.color?.withOpacity(0.8)),
-              //   onPressed: () { /* TODO: Open filter options */ },
-              // ),
-              border: InputBorder.none, // Remove default border
-              contentPadding: const EdgeInsets.symmetric(vertical: 10.0, horizontal: 5.0), // Adjust padding
+      extendBodyBehindAppBar: true,
+      body: Stack(
+        children: [
+          // --- Content Area ---
+          Positioned.fill(
+            top: safeAreaTopPadding + totalAppBarAreaHeight + (searchBarHeight / 2) + 8.0,
+            child: PageView(
+              controller: _pageController,
+              onPageChanged: (index) {
+                setState(() { _selectedIndex = index; });
+              },
+              children: _widgetOptions, // Use the updated list
             ),
-            style: TextStyle(color: theme.textTheme.bodyLarge?.color), // Use theme text color
           ),
-        ),
-        actions: [
-          // PinPoints Display
-          Padding( /* ... same as before ... */
-             padding: const EdgeInsets.only(right: 8.0), child: Chip( avatar: Icon(Icons.star_rounded, color: Colors.amber.shade700, size: 18), label: const Text( '1,234', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13), ), backgroundColor: colorScheme.primaryContainer.withOpacity(0.5), labelPadding: const EdgeInsets.symmetric(horizontal: 6), padding: const EdgeInsets.symmetric(horizontal: 4), visualDensity: VisualDensity.compact, ),
-          ),
-          // Notification Icon
-          IconButton( /* ... same as before ... */
-            icon: const Icon(Icons.notifications_none), tooltip: 'Notifications', onPressed: () => _onTopIconPressed('Notifications'),
-          ),
-          // Message Icon
-          IconButton( /* ... same as before ... */
-             icon: const Icon(Icons.message_outlined), tooltip: 'Messages', onPressed: () => _onTopIconPressed('Messages'),
-          ),
-          // Profile Icon
-          IconButton( /* ... same as before ... */
-             icon: const CircleAvatar( radius: 16, backgroundColor: AppColors.booPurple, child: Icon(Icons.person, size: 18, color: Colors.white), ), tooltip: 'Profile', onPressed: () => _onTopIconPressed('Profile'),
-          ),
-          const SizedBox(width: 8),
-        ],
-      ),
 
-      // --- Body Content using PageView ---
-      // Allows smooth swiping between pages (optional)
-      body: PageView(
-        controller: _pageController,
-        // Important: Update index when page is swiped
-        onPageChanged: (index) {
-          // Don't update state if swiping over where the FAB would be
-          // This logic assumes FAB represents index 2 conceptually
-          if (index < 2) { // Indices before FAB
-             setState(() { _selectedIndex = index; });
-          } else if (index >= 2) { // Indices after FAB
-             setState(() { _selectedIndex = index + 1; }); // Adjust index because FAB isn't a page
-          }
-        },
-        children: _widgetOptions, // Use the list WITHOUT the ScannerPage
+          // --- Manual AppBar Background ---
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            height: safeAreaTopPadding + totalAppBarAreaHeight,
+            child: Container(
+              color: customAppBarColor,
+            ),
+          ),
+
+          // --- AppBar Content (Title and Actions) ---
+          Positioned(
+            top: safeAreaTopPadding,
+            left: 0,
+            right: 0,
+            height: totalAppBarAreaHeight,
+            child: AppBar(
+              backgroundColor: Colors.transparent,
+              foregroundColor: Colors.white,
+              elevation: 0,
+              title: Text(
+                 _getAppBarTitle(_selectedIndex), // Updated title lookup
+                 style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 22),
+              ),
+              actions: [
+                 // --- Trophy Icon ---
+                 IconButton(
+                    icon: const Icon(Icons.emoji_events_outlined), // Trophy icon
+                    tooltip: 'Achievements',
+                    onPressed: () => _onTopIconPressed('Achievements'),
+                 ),
+                 // --- Notification Icon ---
+                 IconButton(
+                    icon: const Icon(Icons.notifications_none_outlined),
+                    tooltip: 'Notifications',
+                    onPressed: () => _onTopIconPressed('Notifications'),
+                 ),
+                 // --- Message Icon ---
+                 IconButton(
+                    icon: const Icon(Icons.message_outlined),
+                    tooltip: 'Messages',
+                    onPressed: () => _onTopIconPressed('Messages'),
+                 ),
+                 // --- Profile Icon ---
+                 IconButton(
+                    icon: const CircleAvatar(radius: 14, backgroundColor: AppColors.booPurple, child: Icon(Icons.person, size: 18, color: Colors.white)),
+                    tooltip: 'Profile',
+                    onPressed: () => _onTopIconPressed('Profile')
+                 ),
+                 const SizedBox(width: 8),
+              ],
+            ),
+          ),
+
+          // --- Overlapping Search Bar ---
+          Positioned(
+            top: safeAreaTopPadding + totalAppBarAreaHeight - (searchBarHeight / 2),
+            left: 16.0,
+            right: 16.0,
+            height: searchBarHeight,
+            child: Container(
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surface,
+                borderRadius: BorderRadius.circular(searchBarHeight / 2),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.15),
+                    blurRadius: 6,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
+              ),
+              child: TextField(
+                controller: _searchController,
+                decoration: InputDecoration(
+                  hintText: 'Search for something new...',
+                  hintStyle: TextStyle(color: theme.hintColor.withOpacity(0.6), fontSize: 14),
+                  prefixIcon: Icon(Icons.search, color: theme.iconTheme.color?.withOpacity(0.8), size: 20),
+                  suffixIcon: IconButton(
+                    icon: Icon(Icons.filter_list, color: theme.iconTheme.color?.withOpacity(0.8), size: 20),
+                    onPressed: () { print("Filter tapped"); },
+                    tooltip: 'Filter',
+                  ),
+                  border: InputBorder.none,
+                  contentPadding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 5.0),
+                ),
+                style: TextStyle(color: theme.textTheme.bodyLarge?.color, fontSize: 14),
+              ),
+            ),
+          ),
+        ],
       ),
 
       // --- Floating Action Button (Scanner) ---
       floatingActionButton: FloatingActionButton(
         onPressed: _onScannerButtonPressed,
         tooltip: 'Scan Pin',
-        backgroundColor: AppColors.mikeLime, // Use a distinct theme color
-        foregroundColor: Colors.black,      // Contrasting icon color
-        elevation: 2.0,
-        child: const Icon(Icons.qr_code_scanner), // Scanner icon
-        // shape: const CircleBorder(), // Default is circular
+        backgroundColor: customAppBarColor, // Use the blue color
+        foregroundColor: Colors.white,
+        elevation: 4.0,
+        // *** UPDATED SHAPE WITH BORDER ***
+        shape: const CircleBorder(
+          side: BorderSide(color: Colors.white, width: 2.0), // Add white outline
+        ),
+        // *** UPDATED ICON WITH SIZE ***
+        child: const Icon(
+          Icons.camera,
+          size: 30.0, // Increased icon size (adjust as needed)
+        ),
       ),
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked, // Docks FAB in the center
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
 
       // --- Bottom App Bar ---
-      // Holds the other navigation items around the FAB
       bottomNavigationBar: BottomAppBar(
-        shape: const CircularNotchedRectangle(), // Creates the notch for the FAB
-        notchMargin: 6.0, // Space around the FAB notch
-        // color: theme.colorScheme.surface, // Use theme surface color
-        // elevation: 8.0, // Optional elevation
+        shape: const CircularNotchedRectangle(),
+        notchMargin: 8.0,
+        elevation: 8.0,
+        // Optional: Explicitly set height if needed, otherwise it adjusts to padding
+        // height: 50.0, // Example: Try setting a fixed height
         child: Row(
-          // Align icons around the center notch
-          mainAxisAlignment: MainAxisAlignment.spaceAround, // Distributes space
+          mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: <Widget>[
-            _buildBottomNavItem(icon: Icons.dashboard_outlined, label: 'Dashboard', index: 0),
-            _buildBottomNavItem(icon: Icons.style_outlined, label: 'My Pins', index: 1),
-            const SizedBox(width: 40), // Placeholder for the FAB notch area
-            _buildBottomNavItem(icon: Icons.people_outline, label: 'Community', index: 2), // Note index is now 2
-            _buildBottomNavItem(icon: Icons.storefront_outlined, label: 'Marketplace', index: 3), // Note index is now 3
+            // *** UPDATED NAV ITEMS ***
+            _buildBottomNavItem(icon: Icons.dashboard_outlined, activeIcon: Icons.dashboard, label: 'Dashboard', index: 0),
+            _buildBottomNavItem(icon: Icons.style_outlined, activeIcon: Icons.style, label: 'My Pins', index: 1),
+            const SizedBox(width: 48), // Notch placeholder
+            _buildBottomNavItem(icon: Icons.people_outline, activeIcon: Icons.people, label: 'Community', index: 2),
+            _buildBottomNavItem(icon: Icons.storefront_outlined, activeIcon: Icons.storefront, label: 'Pin Market', index: 3),
           ],
         ),
       ),
@@ -173,33 +221,27 @@ class _MainAppShellState extends State<MainAppShell> {
   }
 
   // Helper method to build individual BottomAppBar items
-  Widget _buildBottomNavItem({required IconData icon, required String label, required int index}) {
-    // Adjust index mapping because FAB isn't in the PageView
-    int pageIndex = index;
-    // Calculate the actual selected index for highlighting, accounting for the FAB gap
-    int currentDisplayIndex = _selectedIndex;
-    if (_selectedIndex >= 2) {
-      currentDisplayIndex = _selectedIndex -1; // Adjust index shown in PageView
-    }
+  Widget _buildBottomNavItem({required IconData icon, IconData? activeIcon, required String label, required int index}) {
+     final bool isSelected = (index == _selectedIndex);
+    final color = isSelected ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.onSurface.withOpacity(0.7);
+    final selectedIcon = activeIcon ?? icon;
 
-    final bool isSelected = (pageIndex == currentDisplayIndex);
-    final color = isSelected ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.onSurface.withOpacity(0.6);
-
-    return Expanded( // Ensure items take up space
-      child: InkWell( // Make the whole area tappable
-        onTap: () => _onItemTapped(pageIndex), // Use the original index for tapping logic
-        customBorder: const CircleBorder(), // Nice ripple effect
+    return Expanded(
+      child: InkWell(
+        onTap: () => _onItemTapped(index),
+        customBorder: const CircleBorder(),
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8.0), // Vertical padding
+          // *** FURTHER REDUCED PADDING ***
+          padding: const EdgeInsets.symmetric(vertical: 1.0), // Reduced vertical padding more
           child: Column(
-            mainAxisSize: MainAxisSize.min, // Take minimum vertical space
+            mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              Icon(icon, color: color),
-              const SizedBox(height: 2), // Space between icon and label
+              Icon(isSelected ? selectedIcon : icon, color: color, size: 24),
+              const SizedBox(height: 1), // Keep minimal space
               Text(
                 label,
                 style: TextStyle(
-                  fontSize: 10, // Smaller font size for labels
+                  fontSize: 10,
                   color: color,
                   fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                 ),
@@ -214,18 +256,12 @@ class _MainAppShellState extends State<MainAppShell> {
 
  // Helper function to get AppBar title based on selected index
   String _getAppBarTitle(int index) {
-    // Adjust index for title lookup
-    int adjustedIndex = index;
-     if (index >= 2) {
-      adjustedIndex = index -1; // Use PageView index
-    }
-    switch (adjustedIndex) {
+    // *** UPDATED TITLES ***
+     switch (index) {
       case 0: return 'Dashboard';
       case 1: return 'My Pins';
-      // Case 2 is now Community
       case 2: return 'Community';
-      // Case 3 is now Marketplace
-      case 3: return 'Marketplace';
+      case 3: return 'Pin Market'; // Changed title
       default: return 'PinSpace';
     }
   }
