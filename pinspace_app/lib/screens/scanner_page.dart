@@ -14,9 +14,7 @@ import 'package:supabase_flutter/supabase_flutter.dart'; // Import Supabase for 
 final supabase = Supabase.instance.client;
 
 // --- CONFIGURATION ---
-// Updated PythonAnywhere API URL
 const String pythonApiUrl = 'https://colejunck1.pythonanywhere.com/remove-background';
-// Your existing Supabase Edge Function URL
 const String supabaseEdgeFunctionUrl = 'https://syjgwmubhnhwrrxqphpw.supabase.co/functions/v1/process-pin-image';
 
 
@@ -144,7 +142,6 @@ class _ScannerPageState extends State<ScannerPage> {
     });
   }
 
-  // Step 1: Call PythonAnywhere API
   Future<Uint8List?> _callPythonAnywhereAPI(Uint8List imageBytes, String fileName) async {
     setState(() { _status = ScannerProcessStatus.processingPythonAPI; _errorMessage = null; });
     print('Calling PythonAnywhere API ($pythonApiUrl) for background removal...');
@@ -153,17 +150,11 @@ class _ScannerPageState extends State<ScannerPage> {
       var request = http.MultipartRequest('POST', Uri.parse(pythonApiUrl));
       request.files.add(
         http.MultipartFile.fromBytes(
-          'file', // This 'file' key must match what your Flask app expects
+          'file', 
           imageBytes,
           filename: fileName,
-          // contentType: MediaType('image', 'jpeg'), // Or png, webp depending on original
-                                                    // For rembg, it can handle various inputs
-                                                    // If you add http_parser, you can uncomment and set this.
         ),
       );
-
-      // You can add headers if your PythonAnywhere API requires them (e.g., API key)
-      // request.headers.addAll({'X-API-Key': 'YOUR_PYTHONANYWHERE_API_KEY'});
 
       final response = await request.send();
       print('PythonAPI response status: ${response.statusCode}');
@@ -172,7 +163,6 @@ class _ScannerPageState extends State<ScannerPage> {
         final processedBytes = await response.stream.toBytes();
         print('PythonAPI processing successful. Received ${processedBytes.length} bytes (expected WebP).');
         if (!mounted) return null;
-        // Update UI to show processed image before calling Supabase
         setState(() {
           _processedImageBytes = processedBytes;
           _status = ScannerProcessStatus.pythonAPIProcessed;
@@ -188,7 +178,6 @@ class _ScannerPageState extends State<ScannerPage> {
                 displayError = errorJson['error'];
             }
         } catch (_) {
-            // If errorBody is not JSON, use it as is or default message
             displayError = response.reasonPhrase ?? errorBody;
         }
         if (mounted) {
@@ -211,42 +200,35 @@ class _ScannerPageState extends State<ScannerPage> {
     }
   }
 
-
   Future<void> _handleImageSelection(XFile imageFile) async {
     setState(() {
       _originalXFile = imageFile;
-      _processedImageBytes = null; // Clear previous processed image
+      _processedImageBytes = null; 
       _status = ScannerProcessStatus.imageSelected;
       _errorMessage = null;
       _suggestedImageUrls = [];
     });
 
     _originalImageBytes = await imageFile.readAsBytes();
-    String fileName = imageFile.name; // Use original file name for the API call
+    String fileName = imageFile.name; 
 
-    // Call PythonAnywhere API first
     final processedBytesFromPython = await _callPythonAnywhereAPI(_originalImageBytes!, fileName);
 
     if (processedBytesFromPython != null) {
-      // If smart scan is enabled, proceed to call Supabase Edge Function with the processed image
       if (_isSmartScanEnabled) {
-        // Determine a filename for the processed image (e.g., change extension to .webp)
         String processedFileName = fileName.contains('.')
             ? '${fileName.substring(0, fileName.lastIndexOf('.'))}_processed.webp'
             : '${fileName}_processed.webp';
         await _callSupabaseAI(processedBytesFromPython, processedFileName);
       } else {
-        // If smart scan is off, user might just want the processed image for manual entry
         if (mounted) {
           setState(() { _status = ScannerProcessStatus.manualEntry; });
         }
       }
     } else {
-      // Error handled by _callPythonAnywhereAPI, state is already set to error
       print("Failed to get processed image from PythonAPI.");
     }
   }
-
 
   Future<void> _captureWithCamera() async {
     if (kIsWeb) {
@@ -270,7 +252,6 @@ class _ScannerPageState extends State<ScannerPage> {
   }
 
   Future<void> _pickImageUsingPicker(ImageSource source) async {
-    // Reset some state before picking a new image
     setState(() {
       _originalXFile = null;
       _originalImageBytes = null;
@@ -286,12 +267,11 @@ class _ScannerPageState extends State<ScannerPage> {
     });
 
     try {
-      // Using higher quality for initial pick, Python API will handle final compression
       final XFile? pickedFile = await _picker.pickImage(source: source, imageQuality: 90, maxWidth: 1600);
       if (pickedFile != null) {
         await _handleImageSelection(pickedFile);
       } else {
-        if (mounted) _resetScannerState(); // Go back to camera preview or initial state
+        if (mounted) _resetScannerState(); 
       }
     } catch (e) {
       if (mounted) {
@@ -300,15 +280,13 @@ class _ScannerPageState extends State<ScannerPage> {
     }
   }
 
-  // Renamed from _processImageWithAI to clarify its role (calling Supabase Edge Function)
-  // Now takes processed image bytes as input
   Future<void> _callSupabaseAI(Uint8List processedImageBytes, String processedFileName) async {
     setState(() { _status = ScannerProcessStatus.processingSupabaseAI; _errorMessage = null; });
 
-    final base64Image = base64Encode(processedImageBytes); // Encode the processed WebP
+    final base64Image = base64Encode(processedImageBytes);
     print('Smart Scan: Sending PROCESSED image (filename: $processedFileName, type: image/webp) to Supabase Edge function...');
 
-    if (supabaseEdgeFunctionUrl.startsWith('YOUR_DEPLOYED')) { // Should not happen if URL is set
+    if (supabaseEdgeFunctionUrl.startsWith('YOUR_DEPLOYED')) {
         print("ERROR: Supabase Edge function URL not set.");
         if (mounted) {
             setState(() {
@@ -321,7 +299,6 @@ class _ScannerPageState extends State<ScannerPage> {
 
     final headers = {
       'Content-Type': 'application/json',
-      // Add Authorization header if your Supabase Edge Function requires it
       // 'Authorization': 'Bearer ${supabase.auth.currentSession?.accessToken}',
     };
 
@@ -329,7 +306,7 @@ class _ScannerPageState extends State<ScannerPage> {
       final response = await http.post(
         Uri.parse(supabaseEdgeFunctionUrl),
         headers: headers,
-        body: jsonEncode({'imageData': base64Image, 'imageMimeType': 'image/webp'}), // Send processed image
+        body: jsonEncode({'imageData': base64Image, 'imageMimeType': 'image/webp'}),
       );
 
       print('Supabase Edge Function response status: ${response.statusCode}');
@@ -374,19 +351,16 @@ class _ScannerPageState extends State<ScannerPage> {
 
   Future<void> _lookupPinFacts(String pinIdentifier) async { /* ... same placeholder ... */ }
 
-  // This function is for the manual "Process Image" button if Smart Scan is OFF
   Future<void> _processManually() async {
       if (_originalImageBytes == null) {
           setState(() { _errorMessage = "No image selected to process."; _status = ScannerProcessStatus.error; });
           return;
       }
-      // Call PythonAnywhere API
       final processedBytes = await _callPythonAnywhereAPI(_originalImageBytes!, _originalXFile?.name ?? "manual_scan.png");
       if (processedBytes != null) {
           if (mounted) {
               setState(() {
                   _processedImageBytes = processedBytes;
-                  // If not smart scan, just show the processed image for manual entry
                   _status = ScannerProcessStatus.manualEntry;
               });
           }
@@ -413,36 +387,23 @@ class _ScannerPageState extends State<ScannerPage> {
                     bool previousSmartScanState = _isSmartScanEnabled;
                     setState(() { _isSmartScanEnabled = value; });
 
-                    // Logic for toggling Smart Scan
-                    if (_originalImageBytes != null) { // An image has been selected/captured
-                        if (_isSmartScanEnabled && !previousSmartScanState) { // Switched ON
-                            // If we have original bytes, re-initiate the full flow
-                            // If we have processed bytes already (from PythonAPI), just call SupabaseAI
+                    if (_originalImageBytes != null) { 
+                        if (_isSmartScanEnabled && !previousSmartScanState) { 
                             if (_processedImageBytes != null && _status == ScannerProcessStatus.manualEntry) {
                                 await _callSupabaseAI(_processedImageBytes!, "processed_${_originalXFile?.name ?? "image.webp"}");
-                            } else { // No processed bytes yet, or was in a different state, start from PythonAPI
+                            } else { 
                                 final processedBytes = await _callPythonAnywhereAPI(_originalImageBytes!, _originalXFile?.name ?? "image.png");
                                 if (processedBytes != null) {
                                     await _callSupabaseAI(processedBytes, "processed_${_originalXFile?.name ?? "image.webp"}");
                                 }
                             }
-                        } else if (!_isSmartScanEnabled && previousSmartScanState) { // Switched OFF
-                            // If we were showing suggestions or processing AI, move to manual entry with processed image
+                        } else if (!_isSmartScanEnabled && previousSmartScanState) { 
                             if (_status == ScannerProcessStatus.showingSuggestions || _status == ScannerProcessStatus.processingSupabaseAI) {
                                 setState(() { _status = ScannerProcessStatus.manualEntry; });
                             }
-                            // If it was already processed by PythonAPI but not yet sent to Supabase, stay in pythonAPIProcessed or move to manual
                             else if (_status == ScannerProcessStatus.pythonAPIProcessed) {
                                 setState(() { _status = ScannerProcessStatus.manualEntry; });
                             }
-                        }
-                    } else {
-                        // No image yet, just toggle the flag.
-                        // If user was in manual entry without an image, and switches to smart scan,
-                        // they'll need to pick/capture an image first.
-                        if (!_isSmartScanEnabled && _status != ScannerProcessStatus.cameraPreview && _status != ScannerProcessStatus.noCamera) {
-                           // If switching to manual and no image, reset to allow image selection
-                           // _resetScannerState(); // Or just allow manual entry state
                         }
                     }
                   },
@@ -467,7 +428,7 @@ class _ScannerPageState extends State<ScannerPage> {
               _buildSuggestionsSection(),
             
             if (!_isSmartScanEnabled && _status == ScannerProcessStatus.imageSelected && _originalImageBytes != null)
-                 Padding( // Show button to manually trigger Python API if smart scan is OFF and original image is present
+                 Padding( 
                     padding: const EdgeInsets.symmetric(vertical: 8.0),
                     child: OutlinedButton.icon(
                         icon: const Icon(Icons.auto_fix_high),
@@ -476,7 +437,7 @@ class _ScannerPageState extends State<ScannerPage> {
                     ),
                 ),
             if (!_isSmartScanEnabled && (_status == ScannerProcessStatus.manualEntry || _status == ScannerProcessStatus.pythonAPIProcessed) && _processedImageBytes != null)
-              Padding( // Message when image is processed for manual entry
+              Padding( 
                 padding: const EdgeInsets.symmetric(vertical: 8.0),
                 child: Text("Image processed. Fill details below.", textAlign: TextAlign.center, style: TextStyle(color: Theme.of(context).colorScheme.primary)),
               ),
@@ -490,7 +451,11 @@ class _ScannerPageState extends State<ScannerPage> {
             if (_status == ScannerProcessStatus.error && _errorMessage != null)
               Padding(
                 padding: const EdgeInsets.only(top: 10.0),
-                child: Text(_errorMessage!, style: TextStyle(color: Theme.of(context).colorScheme.error, textAlign: TextAlign.center),
+                // CORRECTED LINE: textAlign is a parameter of Text, not TextStyle
+                child: Text(
+                  _errorMessage!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                  textAlign: TextAlign.center, 
                 ),
               ),
             const SizedBox(height: 10),
@@ -527,7 +492,6 @@ class _ScannerPageState extends State<ScannerPage> {
         return const Text("Preparing camera...");
 
       case ScannerProcessStatus.processingPythonAPI:
-         // Show original image while PythonAPI is processing if available
         if (_originalXFile != null) {
           return Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -535,8 +499,8 @@ class _ScannerPageState extends State<ScannerPage> {
               Expanded(child: Padding(
                 padding: const EdgeInsets.all(8.0),
                 child: kIsWeb 
-                    ? Image.network(_originalXFile!.path, fit: BoxFit.contain) 
-                    : Image.file(File(_originalXFile!.path), fit: BoxFit.contain)
+                    ? Image.network(_originalXFile!.path, fit: BoxFit.contain, errorBuilder: (c,e,s) => const Center(child: Text("Error displaying image")))
+                    : Image.file(File(_originalXFile!.path), fit: BoxFit.contain, errorBuilder: (c,e,s) => const Center(child: Text("Error displaying image")))
               )),
               const SizedBox(height: 10),
               const CircularProgressIndicator(),
@@ -551,7 +515,7 @@ class _ScannerPageState extends State<ScannerPage> {
         return Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            if (_processedImageBytes != null) // Show processed image while calling Supabase
+            if (_processedImageBytes != null) 
               Expanded(child: Padding(padding: const EdgeInsets.all(8.0), child: Image.memory(_processedImageBytes!, fit: BoxFit.contain))),
             const SizedBox(height: 10),
             const CircularProgressIndicator(),
@@ -576,7 +540,7 @@ class _ScannerPageState extends State<ScannerPage> {
       case ScannerProcessStatus.error:
         if (_processedImageBytes != null) {
           return Image.memory(_processedImageBytes!, fit: BoxFit.contain, errorBuilder: (c,e,s) => const Center(child: Text("Error displaying processed image")));
-        } else if (_originalXFile != null) { // Fallback to original if Python API failed before processing
+        } else if (_originalXFile != null) { 
            return kIsWeb
               ? Image.network(_originalXFile!.path, fit: BoxFit.contain, errorBuilder: (c,e,s) => const Center(child: Text("Error displaying original image")))
               : Image.file(File(_originalXFile!.path), fit: BoxFit.contain, errorBuilder: (c,e,s) => const Center(child: Text("Error displaying original image")));
@@ -705,6 +669,6 @@ class _ScannerPageState extends State<ScannerPage> {
             ],
         );
     }
-    return Container(); // Default empty container
+    return Container(); 
   }
 }
