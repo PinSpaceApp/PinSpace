@@ -651,20 +651,31 @@ class _ScannerPageState extends State<ScannerPage> {
           ),
         ),
         const SizedBox(height: 8),
+        // *** MODIFIED BUTTON LAYOUT ***
         Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
           children: [
-            ElevatedButton.icon(
-              icon: const Icon(Icons.camera_alt_outlined, size: 18),
-              label: const Text("Capture"),
-              onPressed: !canCapture || (_cameraController == null && !kIsWeb) ? null : () => _captureOrPickImage(ImageSource.camera, target),
-              style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
+            Expanded(
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.camera_alt_outlined, size: 18),
+                label: const Text("Capture"),
+                onPressed: !canCapture || (_cameraController == null && !kIsWeb) ? null : () => _captureOrPickImage(ImageSource.camera, target),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8), // Reduced padding
+                  textStyle: const TextStyle(fontSize: 12), // Smaller text
+                ),
+              ),
             ),
-            ElevatedButton.icon(
-              icon: const Icon(Icons.photo_library_outlined, size: 18),
-              label: const Text("Gallery"),
-              onPressed: !canCapture ? null : () => _captureOrPickImage(ImageSource.gallery, target),
-              style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
+            const SizedBox(width: 8), // Space between buttons
+            Expanded(
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.photo_library_outlined, size: 18),
+                label: const Text("Gallery"),
+                onPressed: !canCapture ? null : () => _captureOrPickImage(ImageSource.gallery, target),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8), // Reduced padding
+                  textStyle: const TextStyle(fontSize: 12), // Smaller text
+                ),
+              ),
             ),
           ],
         )
@@ -697,7 +708,8 @@ class _ScannerPageState extends State<ScannerPage> {
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              "Magic Pin Photography Tip:\nPlace your pin on a plain, well-lit background for the best background removal results! ✨",
+              // *** MODIFIED TIP TEXT ***
+              "PinSpace Photography Tip:\nPlace your pin on a plain, well-lit background for the best background removal results! ✨",
               style: TextStyle(fontSize: 13.5, color: Colors.blueGrey[900], height: 1.4),
             ),
           ),
@@ -728,20 +740,18 @@ class _ScannerPageState extends State<ScannerPage> {
               if (_status == ScannerProcessStatus.initializingCamera)
                 const Center(child: Column(children: [CircularProgressIndicator(), Text("Initializing Camera...")])),
               
-              // Show error or "no camera" message at the top if applicable before attempting to show capture areas
-              if (_status == ScannerProcessStatus.noCamera && kIsWeb) // Only show this specific message for web
+              if (_status == ScannerProcessStatus.noCamera && kIsWeb) 
                  Padding(
                    padding: const EdgeInsets.only(bottom: 16.0),
                    child: Center(child: Text(_errorMessage ?? "Camera not available. Use buttons in image areas.", style: TextStyle(color: Colors.orange[700]))),
                  ),
-              if (_status == ScannerProcessStatus.noCamera && !kIsWeb) // For mobile if no camera
+              if (_status == ScannerProcessStatus.noCamera && !kIsWeb) 
                  Padding(
                    padding: const EdgeInsets.only(bottom: 16.0),
                    child: Center(child: Text(_errorMessage ?? "No camera found.", style: TextStyle(color: Colors.red[700]))),
                  ),
 
 
-              // Show image capture areas if not in the initial camera loading states
               if (_status != ScannerProcessStatus.initializingCamera) ...[
                 _buildPhotoTip(),
                 Row(
@@ -760,17 +770,11 @@ class _ScannerPageState extends State<ScannerPage> {
                   _buildActionButtons(),
                 ] else if (_status != ScannerProcessStatus.processingFrontPythonAPI && 
                            _status != ScannerProcessStatus.processingBackPythonAPI &&
-                           _status != ScannerProcessStatus.error && // Don't show prompt if there's an error
-                           _status != ScannerProcessStatus.noCamera && // Already handled above
+                           _status != ScannerProcessStatus.error && 
+                           _status != ScannerProcessStatus.noCamera && 
                            _status != ScannerProcessStatus.initializingCamera
                            ) ... [
-                    // This prompt might be redundant if capture areas are always visible
-                    // Padding(
-                    //   padding: const EdgeInsets.only(top: 20.0),
-                    //   child: Center(child: Text("Start by capturing the front of your pin.", style: Theme.of(context).textTheme.titleMedium)),
-                    // ),
-                    // Show action buttons (like Reset) even if no image is processed yet but capture areas are visible
-                     _buildActionButtons(),
+                     _buildActionButtons(), // Show reset button if in an intermediate state
                 ],
 
 
@@ -851,44 +855,44 @@ class _ScannerPageState extends State<ScannerPage> {
                     _status != ScannerProcessStatus.processingBackPythonAPI &&
                     _status != ScannerProcessStatus.initializingCamera;
 
-    // Determine if any image interaction has started or if there's an error,
-    // to decide whether to show Save/Reset buttons or nothing.
-    bool imageInteractionStarted = _originalFrontXFile != null || _originalBackXFile != null || _processedFrontImageBytes != null || _processedBackImageBytes != null;
+    // Show action buttons (Save/Clear) if any image interaction has started,
+    // or if there's an error, or if ready for manual entry.
+    // Don't show if purely in camera preview/no camera initial state without any image yet.
+    bool showMainActions = (_originalFrontXFile != null || _originalBackXFile != null || _processedFrontImageBytes != null || _processedBackImageBytes != null || _status == ScannerProcessStatus.error || _status == ScannerProcessStatus.manualEntry);
     
-    // Show Save/Reset buttons if an image interaction has started OR if there's an error allowing reset.
-    // Don't show them if still in pure cameraPreview/noCamera state without any image selected yet.
-    if (!imageInteractionStarted && _status != ScannerProcessStatus.error) {
-        // If status is cameraPreview or noCamera AND no images selected, the buttons are in _buildImageCaptureArea
-        // So, _buildActionButtons should return nothing in this initial state.
-        if (_status == ScannerProcessStatus.cameraPreview || _status == ScannerProcessStatus.noCamera || _status == ScannerProcessStatus.initializingCamera) {
-            return const SizedBox.shrink();
-        }
+    if (!showMainActions && (_status == ScannerProcessStatus.cameraPreview || _status == ScannerProcessStatus.noCamera || _status == ScannerProcessStatus.initializingCamera) ) {
+      // In initial camera/no camera states, the capture buttons are inside _buildImageCaptureArea.
+      // We might only want a "Reset" button if an error occurred in these initial states.
+      if(_status == ScannerProcessStatus.error && _errorMessage != null) {
+         return OutlinedButton.icon(
+            icon: const Icon(Icons.refresh),
+            label: const Text('Start Over'),
+            onPressed: canReset ? _resetScannerState : null, 
+        );
+      }
+      return const SizedBox.shrink();
     }
-
-
+    
+    // If past initial states (e.g. image selected, processing, manual entry, error after selection)
     return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-            // Only show Save button if conditions are met (e.g., front image processed)
-            if (imageInteractionStarted || _status == ScannerProcessStatus.manualEntry) // Show save if form is visible
-              ElevatedButton.icon(
-                  icon: const Icon(Icons.save_alt_outlined),
-                  label: const Text('Save Pin to My Collection'), 
-                  onPressed: canSave ? _savePin : null, 
-                  style: ElevatedButton.styleFrom(
-                      backgroundColor: Theme.of(context).colorScheme.primary, 
-                      foregroundColor: Theme.of(context).colorScheme.onPrimary,
-                      padding: const EdgeInsets.symmetric(vertical: 12)
-                  ),
-              ),
-            if (imageInteractionStarted || _status == ScannerProcessStatus.error) // Show reset if any interaction or error
-              const SizedBox(height: 10),
-            if (imageInteractionStarted || _status == ScannerProcessStatus.error)
-              OutlinedButton.icon(
-                  icon: const Icon(Icons.refresh),
-                  label: const Text('Clear & Scan New'),
-                  onPressed: canReset ? _resetScannerState : null, 
-              ),
+            ElevatedButton.icon(
+                icon: const Icon(Icons.save_alt_outlined),
+                label: const Text('Save Pin to My Collection'), 
+                onPressed: canSave ? _savePin : null, 
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: Theme.of(context).colorScheme.primary, 
+                    foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                    padding: const EdgeInsets.symmetric(vertical: 12)
+                ),
+            ),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+                icon: const Icon(Icons.refresh),
+                label: const Text('Clear & Scan New'),
+                onPressed: canReset ? _resetScannerState : null, 
+            ),
         ],
     );
   }
