@@ -7,7 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:http/http.dart' as http; // HTTP package for backend calls
 import 'package:camera/camera.dart';
-import 'package:supabase_flutter/supabase_flutter.dart'; // Import Supabase for auth token
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 // Get a reference to the Supabase client instance
 final supabase = Supabase.instance.client;
@@ -19,32 +19,24 @@ const String pythonApiUrl = 'https://colejunck1.pythonanywhere.com/remove-backgr
 class PinSet {
   final int id;
   final String name;
-
   PinSet({required this.id, required this.name});
-
-  // For easier use in lists if needed, though not strictly necessary for this implementation
   @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is PinSet && runtimeType == other.runtimeType && id == other.id;
-
-  @override
-  int get hashCode => id.hashCode;
-
-  @override
-  String toString() {
-    return name; // This allows the Autocomplete widget to display the name
-  }
+  String toString() => name;
 }
 
+// Enum to track which image we are currently targeting
+enum ImageTarget { front, back }
 
 // Define states for the scanner page
 enum ScannerProcessStatus {
   initializingCamera,
-  cameraPreview,
-  imageSelected,
-  processingPythonAPI,
-  manualEntry,
+  cameraPreview, // Ready to capture front
+  frontImageSelected, // Front image selected, pre-Python API call for front
+  processingFrontPythonAPI, // Calling PythonAnywhere for front image
+  frontImageProcessed, // Front image processed, ready to capture back or enter details
+  backImageSelected, // Back image selected, pre-Python API call for back
+  processingBackPythonAPI, // Calling PythonAnywhere for back image
+  manualEntry, // Both images potentially processed, details can be entered
   saving,
   error,
   noCamera,
@@ -62,16 +54,22 @@ class _ScannerPageState extends State<ScannerPage> {
   List<CameraDescription>? _cameras;
   Future<void>? _initializeControllerFuture;
 
-  XFile? _originalXFile;
-  Uint8List? _originalImageBytes;
-  Uint8List? _processedImageBytes;
+  // Front Image State
+  XFile? _originalFrontXFile;
+  Uint8List? _originalFrontImageBytes;
+  Uint8List? _processedFrontImageBytes;
+
+  // Back Image State
+  XFile? _originalBackXFile;
+  Uint8List? _originalBackImageBytes;
+  Uint8List? _processedBackImageBytes; 
 
   final _pinNameController = TextEditingController();
-  final _setController = TextEditingController(); // Still used for typing
+  final _setController = TextEditingController();
   
-  List<PinSet> _existingSets = []; // Now stores PinSet objects
-  List<PinSet> _filteredSetSuggestions = []; // For display in overlay
-  PinSet? _selectedSet; // Stores the currently selected PinSet object
+  List<PinSet> _existingSets = []; 
+  List<PinSet> _filteredSetSuggestions = []; 
+  PinSet? _selectedSet; 
 
   final FocusNode _setFocusNode = FocusNode();
   OverlayEntry? _setSuggestionsOverlayEntry;
@@ -81,6 +79,7 @@ class _ScannerPageState extends State<ScannerPage> {
   ScannerProcessStatus _status = ScannerProcessStatus.initializingCamera;
 
   final ImagePicker _picker = ImagePicker();
+  bool _showTip = true;
 
   @override
   void initState() {
@@ -90,7 +89,7 @@ class _ScannerPageState extends State<ScannerPage> {
     } else {
       setState(() {
         _status = ScannerProcessStatus.noCamera;
-        _errorMessage = "Live camera preview not available on web. Use buttons.";
+        _errorMessage = "Live camera preview not available on web. Use buttons below image areas.";
       });
     }
     _fetchUserSets(); 
@@ -121,7 +120,7 @@ class _ScannerPageState extends State<ScannerPage> {
       final userId = supabase.auth.currentUser!.id;
       final response = await supabase
           .from('sets')
-          .select('id, name') // Fetch ID and name
+          .select('id, name') 
           .eq('user_id', userId)
           .order('name', ascending: true); 
 
@@ -133,9 +132,7 @@ class _ScannerPageState extends State<ScannerPage> {
           _existingSets = sets;
         });
       }
-      print("Fetched sets: ${_existingSets.map((s)=> s.name).toList()}");
     } catch (e) {
-      print("Error fetching sets: $e");
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text("Error fetching your sets: ${e.toString()}"), backgroundColor: Colors.red)
@@ -151,7 +148,7 @@ class _ScannerPageState extends State<ScannerPage> {
   void _onSetSearchChanged() {
     final String query = _setController.text.trim(); 
     final String lowerCaseQuery = query.toLowerCase();
-    List<PinSet> currentSuggestions; // Now a list of PinSet
+    List<PinSet> currentSuggestions;
 
     if (query.isEmpty) {
       currentSuggestions = List.from(_existingSets);
@@ -167,11 +164,9 @@ class _ScannerPageState extends State<ScannerPage> {
       });
     }
 
-    // This will trigger the overlay to rebuild if it's visible
     if (_setSuggestionsOverlayEntry != null && _setFocusNode.hasFocus) {
         _setSuggestionsOverlayEntry!.markNeedsBuild();
-    } else if (_setFocusNode.hasFocus && _filteredSetSuggestions.isNotEmpty && _setSuggestionsOverlayEntry == null) {
-        // If overlay was dismissed but field has focus and suggestions exist, show it
+    } else if (_setFocusNode.hasFocus && (_filteredSetSuggestions.isNotEmpty || query.isNotEmpty) && _setSuggestionsOverlayEntry == null) {
         _showSetSuggestionsPanel(true);
     }
   }
@@ -185,14 +180,12 @@ class _ScannerPageState extends State<ScannerPage> {
         return;
     }
 
-    _showSetSuggestionsPanel(false); // Hide suggestions first
+    _showSetSuggestionsPanel(false); 
     _setFocusNode.unfocus();
 
-
-    // Check if set already exists (case-insensitive) locally
     final existingLocalSet = _existingSets.firstWhere(
         (s) => s.name.toLowerCase() == newSetName.toLowerCase(),
-        orElse: () => PinSet(id: -1, name: "") // Dummy non-matching PinSet
+        orElse: () => PinSet(id: -1, name: "") 
     );
 
     if (existingLocalSet.id != -1) {
@@ -203,40 +196,28 @@ class _ScannerPageState extends State<ScannerPage> {
                 _setController.selection = TextSelection.fromPosition(
                     TextPosition(offset: _setController.text.length));
             });
-            ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text("Set \"${existingLocalSet.name}\" already exists and has been selected."), backgroundColor: Colors.blue));
         }
         return;
     }
-
-    // Show loading or disable button
-    // For simplicity, we proceed.
-
     try {
       final userId = supabase.auth.currentUser!.id;
       final List<Map<String, dynamic>> response = await supabase.from('sets').insert({
         'user_id': userId,
         'name': newSetName, 
-      }).select('id, name'); // Select to get the inserted row, including its ID and name
+      }).select('id, name'); 
 
-
-      if (response.isEmpty) {
-        throw Exception("Failed to create set or retrieve its ID.");
-      }
+      if (response.isEmpty) throw Exception("Failed to create set or retrieve its ID.");
       final newSetData = response.first;
       final createdSet = PinSet(id: newSetData['id'] as int, name: newSetData['name'] as String);
-
-      print("Successfully created set '${createdSet.name}' (ID: ${createdSet.id}) in Supabase.");
 
       if (mounted) {
         if (!_existingSets.any((s) => s.id == createdSet.id)) {
            _existingSets.add(createdSet);
            _existingSets.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase())); 
         }
-        
         setState(() {
           _setController.text = createdSet.name; 
-          _selectedSet = createdSet; // Store the selected PinSet object
+          _selectedSet = createdSet; 
           _setController.selection = TextSelection.fromPosition(
               TextPosition(offset: _setController.text.length));
         });
@@ -245,14 +226,12 @@ class _ScannerPageState extends State<ScannerPage> {
         );
       }
     } catch (e) {
-      print("Error creating new set in Supabase: $e");
       if (mounted) {
-        String errorMessage = "Failed to create set.";
+         String errorMessage = "Failed to create set.";
         if (e is PostgrestException) {
             if (e.message.contains('unique_set_name_for_user')) {
                 errorMessage = "Set \"$newSetName\" already exists.";
-                // Attempt to fetch and select it if it somehow got created by another client
-                await _fetchUserSets(); // Refresh the list
+                await _fetchUserSets(); 
                 final justCreatedSet = _existingSets.firstWhere(
                     (s) => s.name.toLowerCase() == newSetName.toLowerCase(),
                     orElse: () => PinSet(id: -1, name: "")
@@ -276,27 +255,23 @@ class _ScannerPageState extends State<ScannerPage> {
     }
   }
 
-
   void _showSetSuggestionsPanel(bool show) {
     if (show && _setSuggestionsOverlayEntry == null) {
       final overlay = Overlay.of(context);
       if (overlay == null) return;
-
       final RenderBox? textFieldRenderBox = _setFocusNode.context?.findRenderObject() as RenderBox?;
       if (textFieldRenderBox == null) return; 
 
       final textFieldSize = textFieldRenderBox.size;
       final textFieldOffset = textFieldRenderBox.localToGlobal(Offset.zero, ancestor: overlay.context.findRenderObject());
 
-      // Generate suggestions for display (strings)
-      List<String> displaySuggestions = _filteredSetSuggestions.map((set) => set.name).toList();
+      List<String> displayableSuggestionStrings = _filteredSetSuggestions.map((set) => set.name).toList();
       final String currentQuery = _setController.text.trim();
       final bool exactMatchInFiltered = _filteredSetSuggestions.any((set) => set.name.toLowerCase() == currentQuery.toLowerCase());
 
       if (currentQuery.isNotEmpty && !exactMatchInFiltered) {
-          displaySuggestions.insert(0, "+ Create \"$currentQuery\"");
+          displayableSuggestionStrings.insert(0, "+ Create \"$currentQuery\"");
       }
-
 
       _setSuggestionsOverlayEntry = OverlayEntry(
         builder: (context) => Positioned(
@@ -311,43 +286,38 @@ class _ScannerPageState extends State<ScannerPage> {
               child: ListView.builder(
                 padding: EdgeInsets.zero,
                 shrinkWrap: true,
-                itemCount: displaySuggestions.length, // Use displaySuggestions
+                itemCount: displayableSuggestionStrings.length,
                 itemBuilder: (context, index) {
-                  final suggestionString = displaySuggestions[index];
+                  final suggestionString = displayableSuggestionStrings[index];
                   bool isCreateOption = suggestionString.startsWith("+ Create \"");
                   
                   String textToShow = suggestionString;
                   if (isCreateOption) {
-                    textToShow = suggestionString.substring(2); // Removes "+ "
+                    textToShow = suggestionString.substring(2); 
                   }
 
                   return ListTile(
                     title: Text(
                         textToShow, 
                         style: TextStyle(
-                            fontWeight: isCreateOption 
-                                        ? FontWeight.bold 
-                                        : FontWeight.normal,
-                            color: isCreateOption
-                                        ? Theme.of(context).colorScheme.primary
-                                        : null
+                            fontWeight: isCreateOption ? FontWeight.bold : FontWeight.normal,
+                            color: isCreateOption ? Theme.of(context).colorScheme.primary : null
                         ),
                     ),
                     dense: true,
                     onTap: () {
                       if (isCreateOption) {
-                        String newSetNameFromTextField = _setController.text.trim(); // Name to create
+                        String newSetNameFromTextField = _setController.text.trim();
                         _createNewSetAndSelect(newSetNameFromTextField); 
                       } else {
-                        // User selected an existing set from the string list, find the PinSet object
                         final selectedPinSet = _existingSets.firstWhere(
-                            (s) => s.name == suggestionString,
-                            orElse: () => PinSet(id: -1, name: "") // Should not happen if list is correct
+                            (s) => s.name == suggestionString, 
+                            orElse: () => PinSet(id: -1, name: "") 
                         );
                         if (mounted && selectedPinSet.id != -1) {
                           setState(() {
                             _setController.text = selectedPinSet.name; 
-                            _selectedSet = selectedPinSet; // Store the PinSet object
+                            _selectedSet = selectedPinSet; 
                             _setController.selection = TextSelection.fromPosition(
                                   TextPosition(offset: _setController.text.length));
                           });
@@ -364,7 +334,7 @@ class _ScannerPageState extends State<ScannerPage> {
         ),
       );
       overlay.insert(_setSuggestionsOverlayEntry!);
-      // _onSetSearchChanged(); // This might be redundant if called by text field listener
+      if(_setFocusNode.hasFocus) _onSetSearchChanged();
     } else if (!show && _setSuggestionsOverlayEntry != null) {
       _setSuggestionsOverlayEntry!.remove();
       _setSuggestionsOverlayEntry = null;
@@ -372,8 +342,8 @@ class _ScannerPageState extends State<ScannerPage> {
   }
 
   Future<void> _initializeCamera() async {
-    if (kIsWeb) {
-      setState(() { _status = ScannerProcessStatus.noCamera; _errorMessage = "Live preview unavailable on web."; });
+     if (kIsWeb) {
+      setState(() { _status = ScannerProcessStatus.noCamera; _errorMessage = "Live camera preview not available on web. Use buttons."; });
       return;
     }
     try {
@@ -414,13 +384,17 @@ class _ScannerPageState extends State<ScannerPage> {
 
   void _resetScannerState() {
     setState(() {
-      _originalXFile = null;
-      _originalImageBytes = null;
-      _processedImageBytes = null;
+      _originalFrontXFile = null;
+      _originalFrontImageBytes = null;
+      _processedFrontImageBytes = null;
+      _originalBackXFile = null;
+      _originalBackImageBytes = null;
+      _processedBackImageBytes = null; 
+
       _errorMessage = null;
       _pinNameController.clear();
       _setController.clear(); 
-      _selectedSet = null; // Clear selected set object
+      _selectedSet = null; 
       _filteredSetSuggestions = [];
       _showSetSuggestionsPanel(false); 
 
@@ -431,65 +405,44 @@ class _ScannerPageState extends State<ScannerPage> {
         _initializeCamera();
       } else {
         _status = ScannerProcessStatus.noCamera;
-        _errorMessage = "Use buttons to scan or upload.";
+        _errorMessage = "Live camera preview not available on web. Use buttons below image areas."; 
       }
     });
   }
 
-  Future<Uint8List?> _callPythonAnywhereAPI(Uint8List imageBytes, String fileName) async {
-    setState(() { _status = ScannerProcessStatus.processingPythonAPI; _errorMessage = null; });
-    print('CALLING PYTHON API: URL: $pythonApiUrl');
-    print('CALLING PYTHON API: Original image byte length: ${imageBytes.length}');
-    print('CALLING PYTHON API: Original filename: $fileName');
+  Future<Uint8List?> _callPythonAnywhereAPI(Uint8List imageBytes, String fileName, ImageTarget target) async {
+    setState(() { 
+      _status = (target == ImageTarget.front) ? ScannerProcessStatus.processingFrontPythonAPI : ScannerProcessStatus.processingBackPythonAPI;
+      _errorMessage = null; 
+    });
+    print('CALLING PYTHON API: URL: $pythonApiUrl for ${target.name} image: $fileName');
     
     try {
       var request = http.MultipartRequest('POST', Uri.parse(pythonApiUrl));
-      request.files.add(
-        http.MultipartFile.fromBytes(
-          'file',
-          imageBytes,
-          filename: fileName,
-        ),
-      );
-
+      request.files.add(http.MultipartFile.fromBytes('file', imageBytes, filename: fileName));
       final response = await request.send();
-      print('PYTHON API RESPONSE: Status Code: ${response.statusCode}');
-      response.headers.forEach((key, value) {
-          print('PYTHON API RESPONSE: Header: $key = $value');
-      });
-
+      print('PYTHON API RESPONSE (${target.name}): Status Code: ${response.statusCode}');
+      
       if (response.statusCode == 200) {
         final processedBytes = await response.stream.toBytes();
-        print('PYTHON API RESPONSE: Success. Received processed byte length: ${processedBytes.length}');
-        if (!mounted) return null;
+        print('PYTHON API RESPONSE (${target.name}): Success. Received ${processedBytes.length} bytes.');
         return processedBytes;
       } else {
         final errorBody = await response.stream.bytesToString();
-        print('PYTHON API RESPONSE: Error Body: $errorBody');
-        String displayError = errorBody;
-        try {
-            final Map<String, dynamic> errorJson = jsonDecode(errorBody);
-            if (errorJson.containsKey('error')) {
-                displayError = errorJson['error'];
-            }
-        } catch (_) {
-            displayError = response.reasonPhrase ?? errorBody;
-        }
-        if (mounted) {
+        print('PYTHON API RESPONSE (${target.name}): Error Body: $errorBody');
+        if(mounted) {
           setState(() {
-            _processedImageBytes = null;
-            _errorMessage = 'PythonAPI processing failed: $displayError';
+            _errorMessage = 'PythonAPI processing for ${target.name} failed: ${jsonDecode(errorBody)['error'] ?? errorBody}';
             _status = ScannerProcessStatus.error;
           });
         }
         return null;
       }
     } catch (e) {
-      print('PYTHON API CALL: Exception: $e');
-      if (mounted) {
+      print('PYTHON API CALL (${target.name}): Exception: $e');
+      if(mounted) {
         setState(() {
-          _processedImageBytes = null;
-          _errorMessage = 'Could not connect to Python processing service: $e';
+          _errorMessage = 'Could not connect to Python processing service for ${target.name}: $e';
           _status = ScannerProcessStatus.error;
         });
       }
@@ -497,90 +450,93 @@ class _ScannerPageState extends State<ScannerPage> {
     }
   }
 
-  Future<void> _handleImageSelection(XFile imageFile) async {
-    setState(() {
-      _originalXFile = imageFile;
-      _processedImageBytes = null;
-      _status = ScannerProcessStatus.imageSelected;
-      _errorMessage = null;
-    });
-
-    _originalImageBytes = await imageFile.readAsBytes();
+  Future<void> _handleImageSelection(XFile imageFile, ImageTarget target) async {
+    final imageBytes = await imageFile.readAsBytes();
     String fileName = imageFile.name;
 
-    final processedBytesFromPython = await _callPythonAnywhereAPI(_originalImageBytes!, fileName);
-    
-    if (mounted) {
-        if (processedBytesFromPython != null) {
-            setState(() {
-                _processedImageBytes = processedBytesFromPython;
-                _status = ScannerProcessStatus.manualEntry; 
-            });
-        } else {
-            if (_status != ScannerProcessStatus.error) {
-                 setState(() { _status = ScannerProcessStatus.error; _errorMessage = _errorMessage ?? "Failed to process image via Python API.";});
-            }
+    if (target == ImageTarget.front) {
+      setState(() {
+        _originalFrontXFile = imageFile;
+        _originalFrontImageBytes = imageBytes;
+        _processedFrontImageBytes = null; 
+        _errorMessage = null;
+      });
+      
+      final processedBytes = await _callPythonAnywhereAPI(imageBytes, fileName, ImageTarget.front);
+      if (mounted) {
+        if (processedBytes != null) {
+          setState(() {
+            _processedFrontImageBytes = processedBytes;
+            _status = _originalBackXFile == null ? ScannerProcessStatus.frontImageProcessed : ScannerProcessStatus.manualEntry;
+          });
+        } 
+      }
+    } else if (target == ImageTarget.back) {
+      setState(() {
+        _originalBackXFile = imageFile;
+        _originalBackImageBytes = imageBytes;
+        _processedBackImageBytes = null; 
+        _errorMessage = null;
+      });
+
+      final processedBytes = await _callPythonAnywhereAPI(imageBytes, fileName, ImageTarget.back);
+      if (mounted) {
+        if (processedBytes != null) {
+          setState(() {
+            _processedBackImageBytes = processedBytes;
+            _status = ScannerProcessStatus.manualEntry; 
+          });
+        } 
+      }
+    }
+  }
+
+  Future<void> _captureOrPickImage(ImageSource source, ImageTarget target) async {
+    if (target == ImageTarget.front) {
+      setState(() { _originalFrontXFile = null; _originalFrontImageBytes = null; _processedFrontImageBytes = null; });
+    } else {
+      setState(() { _originalBackXFile = null; _originalBackImageBytes = null; _processedBackImageBytes = null; });
+    }
+
+    if (source == ImageSource.camera && !kIsWeb) {
+      if (_cameraController == null || !_cameraController!.value.isInitialized) {
+        setState(() { _errorMessage = 'Camera not ready.'; _status = ScannerProcessStatus.error; });
+        return;
+      }
+      if (_cameraController!.value.isTakingPicture) return;
+      try {
+        final XFile imageXFile = await _cameraController!.takePicture();
+        await _handleImageSelection(imageXFile, target);
+      } catch (e) {
+        if (mounted) setState(() { _errorMessage = 'Failed to capture image: $e'; _status = ScannerProcessStatus.error; });
+      }
+    } else { 
+      try {
+        final XFile? pickedFile = await _picker.pickImage(source: source, imageQuality: 90, maxWidth: 1600);
+        if (pickedFile != null) {
+          await _handleImageSelection(pickedFile, target);
         }
-    }
-  }
-
-  Future<void> _captureWithCamera() async {
-    if (kIsWeb) {
-      await _pickImageUsingPicker(ImageSource.camera);
-      return;
-    }
-    if (_cameraController == null || !_cameraController!.value.isInitialized) {
-      setState(() { _errorMessage = 'Camera not ready.'; _status = ScannerProcessStatus.error; });
-      return;
-    }
-    if (_cameraController!.value.isTakingPicture) return;
-
-    try {
-      final XFile imageXFile = await _cameraController!.takePicture();
-      await _handleImageSelection(imageXFile);
-    } catch (e) {
-      if (mounted) {
-        setState(() { _errorMessage = 'Failed to capture image: $e'; _status = ScannerProcessStatus.error; });
-      }
-    }
-  }
-
-  Future<void> _pickImageUsingPicker(ImageSource source) async {
-    setState(() {
-      _originalXFile = null;
-      _originalImageBytes = null;
-      _processedImageBytes = null;
-      _errorMessage = null;
-      _pinNameController.clear();
-      _setController.clear();
-      _selectedSet = null; // Clear selected set object
-      _filteredSetSuggestions.clear();
-      _showSetSuggestionsPanel(false);
-    });
-    try {
-      final XFile? pickedFile = await _picker.pickImage(source: source, imageQuality: 90, maxWidth: 1600);
-      if (pickedFile != null) {
-        await _handleImageSelection(pickedFile);
-      } else {
-        if (mounted) _resetScannerState();
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() { _errorMessage = 'Failed to pick image: $e'; _status = ScannerProcessStatus.error; });
+      } catch (e) {
+        if (mounted) setState(() { _errorMessage = 'Failed to pick image: $e'; _status = ScannerProcessStatus.error; });
       }
     }
   }
   
   void _savePin() async { 
-    if (_processedImageBytes == null) {
+    if (_processedFrontImageBytes == null) { 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("No processed image to save."))
+        const SnackBar(content: Text("Front image is missing or not processed."))
       );
       return;
     }
-    final String pinName = _pinNameController.text.trim();
-    // final String setNameFromField = _setController.text.trim(); // Value in text field
+    if (_originalBackXFile != null && _processedBackImageBytes == null && _status != ScannerProcessStatus.processingBackPythonAPI) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Back image selected but not yet processed. Please wait or try again."))
+      );
+      return; 
+    }
 
+    final String pinName = _pinNameController.text.trim();
     if (pinName.isEmpty) {
        ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Pin name cannot be empty."))
@@ -588,40 +544,47 @@ class _ScannerPageState extends State<ScannerPage> {
       return;
     }
     
-    // Set name is optional. If _selectedSet is null but _setController has text,
-    // it means user typed something but didn't explicitly create/select.
-    // For now, we only save set_id if _selectedSet is not null.
-    // You could add logic here to auto-create if _setController.text is new and _selectedSet is null.
-
     setState(() { _status = ScannerProcessStatus.saving; });
 
     try {
       final userId = supabase.auth.currentUser!.id;
-      final imagePath = '$userId/${DateTime.now().millisecondsSinceEpoch}.webp';
-      
+      String? publicFrontImageUrl;
+      String? publicBackImageUrl;
+
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+
+      final frontImageFileName = _originalFrontXFile?.name ?? "front_$timestamp.webp";
+      final frontImagePath = '$userId/front_${timestamp}_${Uri.encodeComponent(frontImageFileName)}';
       await supabase.storage.from('pin-images').uploadBinary(
-        imagePath,
-        _processedImageBytes!,
+        frontImagePath,
+        _processedFrontImageBytes!,
         fileOptions: const FileOptions(contentType: 'image/webp', upsert: false),
       );
-      final publicImageUrl = supabase.storage.from('pin-images').getPublicUrl(imagePath);
+      publicFrontImageUrl = supabase.storage.from('pin-images').getPublicUrl(frontImagePath);
+
+      if (_processedBackImageBytes != null) { 
+        final backImageFileName = _originalBackXFile?.name ?? "back_$timestamp.webp";
+        final backImagePath = '$userId/back_${timestamp}_${Uri.encodeComponent(backImageFileName)}';
+        
+        await supabase.storage.from('pin-images').uploadBinary(
+          backImagePath,
+          _processedBackImageBytes!, 
+          fileOptions: const FileOptions(contentType: 'image/webp', upsert: false), 
+        );
+        publicBackImageUrl = supabase.storage.from('pin-images').getPublicUrl(backImagePath);
+      }
       
       Map<String, dynamic> pinData = {
         'user_id': userId,
         'name': pinName,
-        'image_url': publicImageUrl,
+        'image_url': publicFrontImageUrl, 
+        'image_back_url': publicBackImageUrl, 
         'quantity': 1, 
       };
 
-      if (_selectedSet != null) { // Use the ID from the selected PinSet object
+      if (_selectedSet != null) { 
         pinData['set_id'] = _selectedSet!.id;
       }
-      // If you also want to store the set_name directly in pins table (redundant but sometimes useful for display)
-      // if (_selectedSet != null) {
-      //   pinData['set_name_cache'] = _selectedSet!.name;
-      // } else if (setNameFromField.isNotEmpty) {
-      //   pinData['set_name_cache'] = setNameFromField; // If user typed something but didn't create/select
-      // }
       
       await supabase.from('pins').insert(pinData);
 
@@ -643,52 +606,185 @@ class _ScannerPageState extends State<ScannerPage> {
     }
   }
 
+  Widget _buildImageCaptureArea(ImageTarget target) {
+    bool isFront = target == ImageTarget.front;
+    XFile? currentOriginalXFile = isFront ? _originalFrontXFile : _originalBackXFile;
+    Uint8List? displayBytes = isFront ? _processedFrontImageBytes : _processedBackImageBytes;
+    displayBytes ??= isFront ? _originalFrontImageBytes : _originalBackImageBytes;
+
+    String title = isFront ? "Pin Front" : "Pin Back";
+    bool isLoadingThisImage = (isFront && _status == ScannerProcessStatus.processingFrontPythonAPI) ||
+                              (!isFront && _status == ScannerProcessStatus.processingBackPythonAPI);
+    
+    bool canCapture = _status != ScannerProcessStatus.saving && !isLoadingThisImage;
+
+    Widget imageDisplayContent;
+    if (isLoadingThisImage) {
+        imageDisplayContent = const Center(child: Column(mainAxisSize: MainAxisSize.min, children: [CircularProgressIndicator(), SizedBox(height:8), Text("Processing...")],));
+    } else if (displayBytes != null) {
+      imageDisplayContent = Image.memory(displayBytes, fit: BoxFit.contain, errorBuilder: (c,e,s) => const Icon(Icons.broken_image, size: 50, color: Colors.grey));
+    } else if (currentOriginalXFile != null && !isFront && !isLoadingThisImage) { 
+       imageDisplayContent = kIsWeb 
+          ? Image.network(currentOriginalXFile.path, fit: BoxFit.contain, errorBuilder: (c,e,s) => const Icon(Icons.broken_image, size: 50, color: Colors.grey))
+          : Image.file(File(currentOriginalXFile.path), fit: BoxFit.contain, errorBuilder: (c,e,s) => const Icon(Icons.broken_image, size: 50, color: Colors.grey));
+    }
+    else {
+      imageDisplayContent = Icon(isFront ? Icons.photo_camera_front_outlined : Icons.photo_camera_back_outlined, size: 60, color: Colors.grey[400]);
+    }
+
+    return Column(
+      children: [
+        Text(title, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        Expanded(
+          child: Container(
+            width: double.infinity,
+            decoration: BoxDecoration(
+              color: Colors.grey[200],
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.grey.shade400, width: 1.5),
+            ),
+            child: ClipRRect(
+                borderRadius: BorderRadius.circular(11), 
+                child: imageDisplayContent
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            ElevatedButton.icon(
+              icon: const Icon(Icons.camera_alt_outlined, size: 18),
+              label: const Text("Capture"),
+              onPressed: !canCapture || (_cameraController == null && !kIsWeb) ? null : () => _captureOrPickImage(ImageSource.camera, target),
+              style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
+            ),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.photo_library_outlined, size: 18),
+              label: const Text("Gallery"),
+              onPressed: !canCapture ? null : () => _captureOrPickImage(ImageSource.gallery, target),
+              style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
+            ),
+          ],
+        )
+      ],
+    );
+  }
+
+  Widget _buildPhotoTip() {
+    if (!_showTip) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.only(top: 16.0, bottom: 8.0),
+      padding: const EdgeInsets.all(12.0),
+      decoration: BoxDecoration(
+        color: Colors.blueGrey[50]?.withOpacity(0.8), 
+        borderRadius: BorderRadius.circular(12.0),
+        border: Border.all(color: Colors.blueGrey.shade200, width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.blueGrey.shade100.withOpacity(0.5),
+            spreadRadius: 1,
+            blurRadius: 3,
+            offset: const Offset(0, 1),
+          ),
+        ],
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.lightbulb_outline_rounded, color: Colors.amber[700], size: 28),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              "Magic Pin Photography Tip:\nPlace your pin on a plain, well-lit background for the best background removal results! ✨",
+              style: TextStyle(fontSize: 13.5, color: Colors.blueGrey[900], height: 1.4),
+            ),
+          ),
+          InkWell(
+            onTap: () => setState(() => _showTip = false),
+            child: Icon(Icons.close_rounded, size: 20, color: Colors.blueGrey[400]),
+          )
+        ],
+      ),
+    );
+  }
+
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Scan Pin")),
+      appBar: AppBar(title: const Text("Add New Pin")),
       body: GestureDetector( 
         onTap: () {
           FocusScope.of(context).unfocus(); 
           _showSetSuggestionsPanel(false); 
         },
-        child: Padding(
+        child: SingleChildScrollView( 
           padding: const EdgeInsets.all(16.0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              const SizedBox(height: 10),
-              Expanded(
-                flex: 3,
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: Colors.grey[300],
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.grey.shade700),
-                  ),
-                  alignment: Alignment.center,
-                  child: _buildPreviewContent(),
-                ),
-              ),
-              const SizedBox(height: 10),
+              if (_status == ScannerProcessStatus.initializingCamera)
+                const Center(child: Column(children: [CircularProgressIndicator(), Text("Initializing Camera...")])),
               
-              if (_status == ScannerProcessStatus.manualEntry && _processedImageBytes != null)
-                Expanded(
-                  flex: 2, 
-                  child: SingleChildScrollView(child: _buildPinDetailsForm()),
+              // Show error or "no camera" message at the top if applicable before attempting to show capture areas
+              if (_status == ScannerProcessStatus.noCamera && kIsWeb) // Only show this specific message for web
+                 Padding(
+                   padding: const EdgeInsets.only(bottom: 16.0),
+                   child: Center(child: Text(_errorMessage ?? "Camera not available. Use buttons in image areas.", style: TextStyle(color: Colors.orange[700]))),
+                 ),
+              if (_status == ScannerProcessStatus.noCamera && !kIsWeb) // For mobile if no camera
+                 Padding(
+                   padding: const EdgeInsets.only(bottom: 16.0),
+                   child: Center(child: Text(_errorMessage ?? "No camera found.", style: TextStyle(color: Colors.red[700]))),
+                 ),
+
+
+              // Show image capture areas if not in the initial camera loading states
+              if (_status != ScannerProcessStatus.initializingCamera) ...[
+                _buildPhotoTip(),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: SizedBox(height: 280, child: _buildImageCaptureArea(ImageTarget.front))),
+                    const SizedBox(width: 16),
+                    Expanded(child: SizedBox(height: 280, child: _buildImageCaptureArea(ImageTarget.back))),
+                  ],
                 ),
-              if (_status == ScannerProcessStatus.error && _errorMessage != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 10.0),
-                  child: Text(
-                    _errorMessage!,
-                    style: TextStyle(color: Theme.of(context).colorScheme.error),
-                    textAlign: TextAlign.center, 
+                const SizedBox(height: 16),
+                
+                if (_processedFrontImageBytes != null || _processedBackImageBytes != null || _status == ScannerProcessStatus.manualEntry) ...[ 
+                  _buildPinDetailsForm(),
+                  const SizedBox(height: 20),
+                  _buildActionButtons(),
+                ] else if (_status != ScannerProcessStatus.processingFrontPythonAPI && 
+                           _status != ScannerProcessStatus.processingBackPythonAPI &&
+                           _status != ScannerProcessStatus.error && // Don't show prompt if there's an error
+                           _status != ScannerProcessStatus.noCamera && // Already handled above
+                           _status != ScannerProcessStatus.initializingCamera
+                           ) ... [
+                    // This prompt might be redundant if capture areas are always visible
+                    // Padding(
+                    //   padding: const EdgeInsets.only(top: 20.0),
+                    //   child: Center(child: Text("Start by capturing the front of your pin.", style: Theme.of(context).textTheme.titleMedium)),
+                    // ),
+                    // Show action buttons (like Reset) even if no image is processed yet but capture areas are visible
+                     _buildActionButtons(),
+                ],
+
+
+                if (_status == ScannerProcessStatus.error && _errorMessage != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 16.0),
+                    child: Text(
+                      _errorMessage!,
+                      style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 16),
+                      textAlign: TextAlign.center, 
+                    ),
                   ),
-                ),
-              const SizedBox(height: 10),
-              _buildActionButtons(),
-              const SizedBox(height: 10),
+              ],
+              const SizedBox(height: 20), 
             ],
           ),
         ),
@@ -696,93 +792,20 @@ class _ScannerPageState extends State<ScannerPage> {
     );
   }
 
-  Widget _buildPreviewContent() {
-    switch (_status) {
-      case ScannerProcessStatus.initializingCamera:
-        return const Column(mainAxisAlignment: MainAxisAlignment.center, children: [CircularProgressIndicator(), SizedBox(height: 10), Text("Initializing Camera...")]);
-      case ScannerProcessStatus.noCamera:
-        return Text(_errorMessage ?? "No camera found or permission denied.", textAlign: TextAlign.center);
-      case ScannerProcessStatus.cameraPreview:
-        if (kIsWeb) return const Text("Use 'Capture' or 'Gallery' buttons.");
-        if (_cameraController != null && _cameraController!.value.isInitialized) {
-          return FutureBuilder<void>(
-            future: _initializeControllerFuture,
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.done) {
-                return ClipRRect(
-                    borderRadius: BorderRadius.circular(11),
-                    child: CameraPreview(_cameraController!));
-              } else {
-                return const Center(child: CircularProgressIndicator());
-              }
-            },
-          );
-        }
-        return const Text("Preparing camera...");
-
-      case ScannerProcessStatus.processingPythonAPI:
-        if (_originalXFile != null) { 
-          return Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Expanded(child: Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: kIsWeb 
-                    ? Image.network(_originalXFile!.path, fit: BoxFit.contain, errorBuilder: (c,e,s){ print("Error displaying original web image: $e"); return const Center(child: Text("Error displaying image"));})
-                    : Image.file(File(_originalXFile!.path), fit: BoxFit.contain, errorBuilder: (c,e,s){ print("Error displaying original file image: $e"); return const Center(child: Text("Error displaying image"));})
-              )),
-              const SizedBox(height: 10),
-              const CircularProgressIndicator(),
-              const SizedBox(height: 10),
-              const Text("Processing Image..."),
-            ],
-          );
-        }
-        return const Column(mainAxisAlignment: MainAxisAlignment.center, children: [CircularProgressIndicator(), SizedBox(height: 10), Text("Processing Image...")]);
-      
-      case ScannerProcessStatus.saving:
-        return const Column(mainAxisAlignment: MainAxisAlignment.center, children: [CircularProgressIndicator(), SizedBox(height: 10), Text("Saving pin...")]);
-
-      case ScannerProcessStatus.imageSelected: 
-        if (_originalXFile != null) {
-          return kIsWeb
-              ? Image.network(_originalXFile!.path, fit: BoxFit.contain, errorBuilder: (c,e,s) => const Center(child: Text("Error displaying image")))
-              : Image.file(File(_originalXFile!.path), fit: BoxFit.contain, errorBuilder: (c,e,s) => const Center(child: Text("Error displaying image")));
-        }
-        return const Text('Tap Capture or Gallery.');
-
-      case ScannerProcessStatus.manualEntry: 
-      case ScannerProcessStatus.error:
-        if (_processedImageBytes != null) {
-           print('BUILD_PREVIEW: Attempting to display processed image with Image.memory(). Byte length: ${_processedImageBytes!.length}');
-          return Image.memory(_processedImageBytes!, fit: BoxFit.contain, errorBuilder: (c,e,s) {
-            print('BUILD_PREVIEW: ErrorBuilder for Image.memory(): $e');
-            return const Center(child: Text("Error displaying processed image"));
-          });
-        } else if (_originalXFile != null && _status == ScannerProcessStatus.error) { 
-           print('BUILD_PREVIEW: Error status, showing original image as fallback.');
-           return kIsWeb
-              ? Image.network(_originalXFile!.path, fit: BoxFit.contain, errorBuilder: (c,e,s) => const Center(child: Text("Error displaying original image")))
-              : Image.file(File(_originalXFile!.path), fit: BoxFit.contain, errorBuilder: (c,e,s) => const Center(child: Text("Error displaying original image")));
-        }
-        return Text(_errorMessage ?? 'No image to display. Tap Capture or Gallery.');
-      default: 
-        return const Text('Please capture or select an image.');
-    }
-  }
-
   Widget _buildPinDetailsForm() {
-    if (!(_status == ScannerProcessStatus.manualEntry && _processedImageBytes != null)) {
+    bool showForm = _originalFrontXFile != null || _originalBackXFile != null;
+
+    if (!showForm) {
         return const SizedBox.shrink();
     }
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const SizedBox(height: 10),
         TextFormField(
           controller: _pinNameController,
           decoration: const InputDecoration(labelText: 'Pin Name', border: OutlineInputBorder())
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 16),
         Focus( 
           focusNode: _setFocusNode,
           child: TextFormField(
@@ -814,53 +837,59 @@ class _ScannerPageState extends State<ScannerPage> {
   }
 
   Widget _buildActionButtons() {
-    final bool isProcessing = _status == ScannerProcessStatus.processingPythonAPI ||
-                                  _status == ScannerProcessStatus.saving ||
-                                  _status == ScannerProcessStatus.initializingCamera;
-
-    if (_status == ScannerProcessStatus.cameraPreview || _status == ScannerProcessStatus.noCamera || _status == ScannerProcessStatus.initializingCamera) {
-      return Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        children: [
-          Expanded(
-            child: ElevatedButton.icon(
-              icon: const Icon(Icons.camera_alt),
-              label: const Text('Capture'),
-              onPressed: isProcessing || (_status == ScannerProcessStatus.noCamera && !kIsWeb && _cameraController == null) ? null : _captureWithCamera,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: ElevatedButton.icon(
-              icon: const Icon(Icons.photo_library),
-              label: const Text('Gallery'),
-              onPressed: isProcessing ? null : () => _pickImageUsingPicker(ImageSource.gallery),
-            ),
-          ),
-        ],
-      );
-    } else if (_status == ScannerProcessStatus.manualEntry ||
-               _status == ScannerProcessStatus.imageSelected || 
-               _status == ScannerProcessStatus.error) {
-        return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-                if (_status == ScannerProcessStatus.manualEntry && _processedImageBytes != null)
-                    ElevatedButton.icon(
-                        icon: const Icon(Icons.save_alt_outlined),
-                        label: const Text('Save Pin to My Collection'), // MODIFIED TEXT
-                        onPressed: isProcessing ? null : _savePin,
-                        style: ElevatedButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.primary, foregroundColor: Theme.of(context).colorScheme.onPrimary),
-                    ),
-                const SizedBox(height: 10),
-                OutlinedButton.icon(
-                    icon: const Icon(Icons.refresh),
-                    label: const Text('Scan/Upload New Pin'),
-                    onPressed: isProcessing ? null : _resetScannerState,
-                ),
-            ],
-        );
+     bool canSave = _processedFrontImageBytes != null && 
+                   _status != ScannerProcessStatus.saving && 
+                   _status != ScannerProcessStatus.processingFrontPythonAPI &&
+                   _status != ScannerProcessStatus.processingBackPythonAPI &&
+                   _status != ScannerProcessStatus.initializingCamera;
+    if (_originalBackXFile != null && (_processedBackImageBytes == null && _status != ScannerProcessStatus.processingBackPythonAPI)) {
+        canSave = false;
     }
-    return Container(); 
+
+    bool canReset = _status != ScannerProcessStatus.saving && 
+                    _status != ScannerProcessStatus.processingFrontPythonAPI &&
+                    _status != ScannerProcessStatus.processingBackPythonAPI &&
+                    _status != ScannerProcessStatus.initializingCamera;
+
+    // Determine if any image interaction has started or if there's an error,
+    // to decide whether to show Save/Reset buttons or nothing.
+    bool imageInteractionStarted = _originalFrontXFile != null || _originalBackXFile != null || _processedFrontImageBytes != null || _processedBackImageBytes != null;
+    
+    // Show Save/Reset buttons if an image interaction has started OR if there's an error allowing reset.
+    // Don't show them if still in pure cameraPreview/noCamera state without any image selected yet.
+    if (!imageInteractionStarted && _status != ScannerProcessStatus.error) {
+        // If status is cameraPreview or noCamera AND no images selected, the buttons are in _buildImageCaptureArea
+        // So, _buildActionButtons should return nothing in this initial state.
+        if (_status == ScannerProcessStatus.cameraPreview || _status == ScannerProcessStatus.noCamera || _status == ScannerProcessStatus.initializingCamera) {
+            return const SizedBox.shrink();
+        }
+    }
+
+
+    return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+            // Only show Save button if conditions are met (e.g., front image processed)
+            if (imageInteractionStarted || _status == ScannerProcessStatus.manualEntry) // Show save if form is visible
+              ElevatedButton.icon(
+                  icon: const Icon(Icons.save_alt_outlined),
+                  label: const Text('Save Pin to My Collection'), 
+                  onPressed: canSave ? _savePin : null, 
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: Theme.of(context).colorScheme.primary, 
+                      foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                      padding: const EdgeInsets.symmetric(vertical: 12)
+                  ),
+              ),
+            if (imageInteractionStarted || _status == ScannerProcessStatus.error) // Show reset if any interaction or error
+              const SizedBox(height: 10),
+            if (imageInteractionStarted || _status == ScannerProcessStatus.error)
+              OutlinedButton.icon(
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Clear & Scan New'),
+                  onPressed: canReset ? _resetScannerState : null, 
+              ),
+        ],
+    );
   }
 }
