@@ -15,7 +15,8 @@ final supabase = Supabase.instance.client;
 
 // --- CONFIGURATION ---
 const String pythonApiUrl = 'https://colejunck1.pythonanywhere.com/remove-background';
-const String supabaseEdgeFunctionUrl = 'https://syjgwmubhnhwrrxqphpw.supabase.co/functions/v1/process-pin-image';
+// Supabase Edge Function URL - Not used in this version, but kept for future AI details lookup
+// const String supabaseEdgeFunctionUrl = 'https://syjgwmubhnhwrrxqphpw.supabase.co/functions/v1/process-pin-image';
 
 
 // Define states for the scanner page
@@ -24,10 +25,7 @@ enum ScannerProcessStatus {
   cameraPreview,
   imageSelected, // Original image selected, pre-Python API call
   processingPythonAPI, // Calling PythonAnywhere
-  pythonAPIProcessed, // Image back from Python, pre-Supabase call
-  processingSupabaseAI, // Calling Supabase Edge Function (Cloud Vision etc.)
-  showingSuggestions,
-  manualEntry,
+  manualEntry, // Image processed (from Python API), ready for details
   saving,
   error,
   noCamera,
@@ -45,22 +43,18 @@ class _ScannerPageState extends State<ScannerPage> {
   List<CameraDescription>? _cameras;
   Future<void>? _initializeControllerFuture;
 
-  XFile? _originalXFile; // Stores the originally picked/captured file info
-  Uint8List? _originalImageBytes; // Raw bytes of the original image
+  XFile? _originalXFile;
+  Uint8List? _originalImageBytes;
   Uint8List? _processedImageBytes; // Bytes of the image after Python API processing (WebP)
 
-  List<String> _suggestedImageUrls = [];
-  String? _selectedHiResImageUrl;
-
-  final _seriesController = TextEditingController();
-  final _releaseDateController = TextEditingController();
-  final _originController = TextEditingController();
-  final _avgPriceController = TextEditingController();
+  // Controllers for the remaining fields
   final _pinNameController = TextEditingController();
+  final _seriesController = TextEditingController();
+  // Removed: _releaseDateController, _originController, _avgPriceController
 
   String? _errorMessage;
   ScannerProcessStatus _status = ScannerProcessStatus.initializingCamera;
-  bool _isSmartScanEnabled = true;
+  // Removed: _isSmartScanEnabled 
 
   final ImagePicker _picker = ImagePicker();
 
@@ -109,11 +103,11 @@ class _ScannerPageState extends State<ScannerPage> {
   @override
   void dispose() {
     _cameraController?.dispose();
-    _seriesController.dispose();
-    _releaseDateController.dispose();
-    _originController.dispose();
-    _avgPriceController.dispose();
     _pinNameController.dispose();
+    _seriesController.dispose();
+    // Removed: _releaseDateController.dispose();
+    // Removed: _originController.dispose();
+    // Removed: _avgPriceController.dispose();
     super.dispose();
   }
 
@@ -122,19 +116,15 @@ class _ScannerPageState extends State<ScannerPage> {
       _originalXFile = null;
       _originalImageBytes = null;
       _processedImageBytes = null;
-      _suggestedImageUrls = [];
       _errorMessage = null;
-      _selectedHiResImageUrl = null;
       _pinNameController.clear();
       _seriesController.clear();
-      _releaseDateController.clear();
-      _originController.clear();
-      _avgPriceController.clear();
+      // Removed clearing for other controllers
       if (!kIsWeb && _cameraController != null && _cameraController!.value.isInitialized) {
         _status = ScannerProcessStatus.cameraPreview;
       } else if (!kIsWeb) {
         _status = ScannerProcessStatus.initializingCamera;
-        _initializeCamera(); // Re-initialize if needed
+        _initializeCamera();
       } else {
         _status = ScannerProcessStatus.noCamera;
         _errorMessage = "Use buttons to scan or upload.";
@@ -144,34 +134,35 @@ class _ScannerPageState extends State<ScannerPage> {
 
   Future<Uint8List?> _callPythonAnywhereAPI(Uint8List imageBytes, String fileName) async {
     setState(() { _status = ScannerProcessStatus.processingPythonAPI; _errorMessage = null; });
-    print('Calling PythonAnywhere API ($pythonApiUrl) for background removal...');
-
+    print('CALLING PYTHON API: URL: $pythonApiUrl');
+    print('CALLING PYTHON API: Original image byte length: ${imageBytes.length}');
+    print('CALLING PYTHON API: Original filename: $fileName');
+    
     try {
       var request = http.MultipartRequest('POST', Uri.parse(pythonApiUrl));
       request.files.add(
         http.MultipartFile.fromBytes(
-          'file', 
+          'file',
           imageBytes,
           filename: fileName,
         ),
       );
 
       final response = await request.send();
-      print('PythonAPI response status: ${response.statusCode}');
+      print('PYTHON API RESPONSE: Status Code: ${response.statusCode}');
+      response.headers.forEach((key, value) {
+          print('PYTHON API RESPONSE: Header: $key = $value');
+      });
 
       if (response.statusCode == 200) {
         final processedBytes = await response.stream.toBytes();
-        print('PythonAPI processing successful. Received ${processedBytes.length} bytes (expected WebP).');
+        print('PYTHON API RESPONSE: Success. Received processed byte length: ${processedBytes.length}');
         if (!mounted) return null;
-        setState(() {
-          _processedImageBytes = processedBytes;
-          _status = ScannerProcessStatus.pythonAPIProcessed;
-        });
         return processedBytes;
       } else {
         final errorBody = await response.stream.bytesToString();
-        print('PythonAPI error ($pythonApiUrl): $errorBody');
-         String displayError = errorBody;
+        print('PYTHON API RESPONSE: Error Body: $errorBody');
+        String displayError = errorBody;
         try {
             final Map<String, dynamic> errorJson = jsonDecode(errorBody);
             if (errorJson.containsKey('error')) {
@@ -182,6 +173,7 @@ class _ScannerPageState extends State<ScannerPage> {
         }
         if (mounted) {
           setState(() {
+            _processedImageBytes = null;
             _errorMessage = 'PythonAPI processing failed: $displayError';
             _status = ScannerProcessStatus.error;
           });
@@ -189,9 +181,10 @@ class _ScannerPageState extends State<ScannerPage> {
         return null;
       }
     } catch (e) {
-      print('Error calling PythonAnywhere API ($pythonApiUrl): $e');
+      print('PYTHON API CALL: Exception: $e');
       if (mounted) {
         setState(() {
+          _processedImageBytes = null;
           _errorMessage = 'Could not connect to Python processing service: $e';
           _status = ScannerProcessStatus.error;
         });
@@ -203,30 +196,37 @@ class _ScannerPageState extends State<ScannerPage> {
   Future<void> _handleImageSelection(XFile imageFile) async {
     setState(() {
       _originalXFile = imageFile;
-      _processedImageBytes = null; 
-      _status = ScannerProcessStatus.imageSelected;
+      _processedImageBytes = null;
+      _status = ScannerProcessStatus.imageSelected; // Temporarily to show original
       _errorMessage = null;
-      _suggestedImageUrls = [];
     });
 
     _originalImageBytes = await imageFile.readAsBytes();
-    String fileName = imageFile.name; 
+    String fileName = imageFile.name;
 
+    // Always call Python API now
     final processedBytesFromPython = await _callPythonAnywhereAPI(_originalImageBytes!, fileName);
-
-    if (processedBytesFromPython != null) {
-      if (_isSmartScanEnabled) {
-        String processedFileName = fileName.contains('.')
-            ? '${fileName.substring(0, fileName.lastIndexOf('.'))}_processed.webp'
-            : '${fileName}_processed.webp';
-        await _callSupabaseAI(processedBytesFromPython, processedFileName);
-      } else {
-        if (mounted) {
-          setState(() { _status = ScannerProcessStatus.manualEntry; });
+    
+    if (mounted) {
+        if (processedBytesFromPython != null) {
+            setState(() {
+                _processedImageBytes = processedBytesFromPython;
+                _status = ScannerProcessStatus.manualEntry; // Go to manual entry with processed image
+            });
+            // If you re-introduce AI for details lookup later, call it here:
+            // String processedFileName = fileName.contains('.')
+            //     ? '${fileName.substring(0, fileName.lastIndexOf('.'))}_processed.webp'
+            //     : '${fileName}_processed.webp';
+            // await _callSomeAIDetailsLookup(_processedImageBytes!, processedFileName);
+        } else {
+            // Error state already set by _callPythonAnywhereAPI
+            print("Python API call failed. Staying in error state or showing original.");
+            // If _callPythonAnywhereAPI sets status to error, it will be handled by build.
+            // If it returns null but doesn't set error (should not happen), ensure UI reflects it.
+            if (_status != ScannerProcessStatus.error) {
+                 setState(() { _status = ScannerProcessStatus.error; _errorMessage = _errorMessage ?? "Failed to process image via Python API.";});
+            }
         }
-      }
-    } else {
-      print("Failed to get processed image from PythonAPI.");
     }
   }
 
@@ -256,22 +256,16 @@ class _ScannerPageState extends State<ScannerPage> {
       _originalXFile = null;
       _originalImageBytes = null;
       _processedImageBytes = null;
-      _suggestedImageUrls = [];
       _errorMessage = null;
-      _selectedHiResImageUrl = null;
       _pinNameController.clear();
       _seriesController.clear();
-      _releaseDateController.clear();
-      _originController.clear();
-      _avgPriceController.clear();
     });
-
     try {
       final XFile? pickedFile = await _picker.pickImage(source: source, imageQuality: 90, maxWidth: 1600);
       if (pickedFile != null) {
         await _handleImageSelection(pickedFile);
       } else {
-        if (mounted) _resetScannerState(); 
+        if (mounted) _resetScannerState();
       }
     } catch (e) {
       if (mounted) {
@@ -280,92 +274,14 @@ class _ScannerPageState extends State<ScannerPage> {
     }
   }
 
-  Future<void> _callSupabaseAI(Uint8List processedImageBytes, String processedFileName) async {
-    setState(() { _status = ScannerProcessStatus.processingSupabaseAI; _errorMessage = null; });
-
-    final base64Image = base64Encode(processedImageBytes);
-    print('Smart Scan: Sending PROCESSED image (filename: $processedFileName, type: image/webp) to Supabase Edge function...');
-
-    if (supabaseEdgeFunctionUrl.startsWith('YOUR_DEPLOYED')) {
-        print("ERROR: Supabase Edge function URL not set.");
-        if (mounted) {
-            setState(() {
-                _errorMessage = "Scanner service (Supabase) is not configured.";
-                _status = ScannerProcessStatus.error;
-            });
-        }
-        return;
-    }
-
-    final headers = {
-      'Content-Type': 'application/json',
-      // 'Authorization': 'Bearer ${supabase.auth.currentSession?.accessToken}',
-    };
-
-    try {
-      final response = await http.post(
-        Uri.parse(supabaseEdgeFunctionUrl),
-        headers: headers,
-        body: jsonEncode({'imageData': base64Image, 'imageMimeType': 'image/webp'}),
-      );
-
-      print('Supabase Edge Function response status: ${response.statusCode}');
-
-      if (response.statusCode == 200) {
-        final Map<String, dynamic> data = jsonDecode(response.body);
-        final List<dynamic>? urls = data['suggestedUrls'];
-        final String? identifiedName = data['identifiedName'];
-
-        if (mounted) {
-          setState(() {
-            if (identifiedName != null) _pinNameController.text = identifiedName;
-            _suggestedImageUrls = (urls != null && urls.isNotEmpty) ? List<String>.from(urls) : [];
-            _status = ScannerProcessStatus.showingSuggestions;
-          });
-          _lookupPinFacts(_pinNameController.text);
-        }
-      } else {
-        String serverError = response.body;
-        try {
-          final errorData = jsonDecode(response.body);
-          serverError = errorData['error'] ?? response.body;
-        } catch (_) { /* Keep original body if not JSON */ }
-        print('Supabase Edge Function error: $serverError');
-        if (mounted) {
-          setState(() {
-            _errorMessage = 'Cloud Vision processing failed: $serverError';
-            _status = ScannerProcessStatus.error;
-          });
-        }
-      }
-    } catch (e) {
-      print('Error calling Supabase Edge Function: $e');
-      if (mounted) {
-        setState(() {
-          _errorMessage = 'Could not connect to Cloud Vision service: $e';
-          _status = ScannerProcessStatus.error;
-        });
-      }
-    }
-  }
+  // Placeholder for future AI details lookup
+  // Future<void> _callSomeAIDetailsLookup(Uint8List imageBytes, String fileName) async {
+  //   print("Future AI: Looking up details for $fileName");
+  //   // This is where you'd call another service (e.g., a different Supabase function or Google Cloud Vision for object/text detection)
+  // }
 
   Future<void> _lookupPinFacts(String pinIdentifier) async { /* ... same placeholder ... */ }
-
-  Future<void> _processManually() async {
-      if (_originalImageBytes == null) {
-          setState(() { _errorMessage = "No image selected to process."; _status = ScannerProcessStatus.error; });
-          return;
-      }
-      final processedBytes = await _callPythonAnywhereAPI(_originalImageBytes!, _originalXFile?.name ?? "manual_scan.png");
-      if (processedBytes != null) {
-          if (mounted) {
-              setState(() {
-                  _processedImageBytes = processedBytes;
-                  _status = ScannerProcessStatus.manualEntry;
-              });
-          }
-      }
-  }
+  
   void _savePin() async { /* ... same placeholder ... */ }
 
   @override
@@ -377,40 +293,8 @@ class _ScannerPageState extends State<ScannerPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Text('Smart Scan'),
-                Switch(
-                  value: _isSmartScanEnabled,
-                  onChanged: (value) async {
-                    bool previousSmartScanState = _isSmartScanEnabled;
-                    setState(() { _isSmartScanEnabled = value; });
-
-                    if (_originalImageBytes != null) { 
-                        if (_isSmartScanEnabled && !previousSmartScanState) { 
-                            if (_processedImageBytes != null && _status == ScannerProcessStatus.manualEntry) {
-                                await _callSupabaseAI(_processedImageBytes!, "processed_${_originalXFile?.name ?? "image.webp"}");
-                            } else { 
-                                final processedBytes = await _callPythonAnywhereAPI(_originalImageBytes!, _originalXFile?.name ?? "image.png");
-                                if (processedBytes != null) {
-                                    await _callSupabaseAI(processedBytes, "processed_${_originalXFile?.name ?? "image.webp"}");
-                                }
-                            }
-                        } else if (!_isSmartScanEnabled && previousSmartScanState) { 
-                            if (_status == ScannerProcessStatus.showingSuggestions || _status == ScannerProcessStatus.processingSupabaseAI) {
-                                setState(() { _status = ScannerProcessStatus.manualEntry; });
-                            }
-                            else if (_status == ScannerProcessStatus.pythonAPIProcessed) {
-                                setState(() { _status = ScannerProcessStatus.manualEntry; });
-                            }
-                        }
-                    }
-                  },
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
+            // Removed the "Smart Scan" Switch
+            const SizedBox(height: 10), // Keep some spacing
             Expanded(
               flex: 3,
               child: Container(
@@ -424,26 +308,10 @@ class _ScannerPageState extends State<ScannerPage> {
               ),
             ),
             const SizedBox(height: 10),
-            if (_isSmartScanEnabled && _status == ScannerProcessStatus.showingSuggestions && _suggestedImageUrls.isNotEmpty)
-              _buildSuggestionsSection(),
             
-            if (!_isSmartScanEnabled && _status == ScannerProcessStatus.imageSelected && _originalImageBytes != null)
-                 Padding( 
-                    padding: const EdgeInsets.symmetric(vertical: 8.0),
-                    child: OutlinedButton.icon(
-                        icon: const Icon(Icons.auto_fix_high),
-                        label: const Text('Process Image (Remove BG & Enhance)'),
-                        onPressed: _processManually,
-                    ),
-                ),
-            if (!_isSmartScanEnabled && (_status == ScannerProcessStatus.manualEntry || _status == ScannerProcessStatus.pythonAPIProcessed) && _processedImageBytes != null)
-              Padding( 
-                padding: const EdgeInsets.symmetric(vertical: 8.0),
-                child: Text("Image processed. Fill details below.", textAlign: TextAlign.center, style: TextStyle(color: Theme.of(context).colorScheme.primary)),
-              ),
-
-            if ((_isSmartScanEnabled && _status == ScannerProcessStatus.showingSuggestions) || 
-                (!_isSmartScanEnabled && _status == ScannerProcessStatus.manualEntry && _processedImageBytes != null))
+            // The "Process Image" button is no longer needed as it's automatic
+            
+            if (_status == ScannerProcessStatus.manualEntry && _processedImageBytes != null)
               Expanded(
                 flex: 2,
                 child: SingleChildScrollView(child: _buildPinDetailsForm()),
@@ -451,7 +319,6 @@ class _ScannerPageState extends State<ScannerPage> {
             if (_status == ScannerProcessStatus.error && _errorMessage != null)
               Padding(
                 padding: const EdgeInsets.only(top: 10.0),
-                // CORRECTED LINE: textAlign is a parameter of Text, not TextStyle
                 child: Text(
                   _errorMessage!,
                   style: TextStyle(color: Theme.of(context).colorScheme.error),
@@ -468,6 +335,7 @@ class _ScannerPageState extends State<ScannerPage> {
   }
 
   Widget _buildPreviewContent() {
+    // print("BUILD_PREVIEW: Status: $_status, OriginalBytes: ${_originalImageBytes?.length}, ProcessedBytes: ${_processedImageBytes?.length}");
     switch (_status) {
       case ScannerProcessStatus.initializingCamera:
         return const Column(mainAxisAlignment: MainAxisAlignment.center, children: [CircularProgressIndicator(), SizedBox(height: 10), Text("Initializing Camera...")]);
@@ -492,41 +360,29 @@ class _ScannerPageState extends State<ScannerPage> {
         return const Text("Preparing camera...");
 
       case ScannerProcessStatus.processingPythonAPI:
-        if (_originalXFile != null) {
+        if (_originalXFile != null) { 
           return Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Expanded(child: Padding(
                 padding: const EdgeInsets.all(8.0),
                 child: kIsWeb 
-                    ? Image.network(_originalXFile!.path, fit: BoxFit.contain, errorBuilder: (c,e,s) => const Center(child: Text("Error displaying image")))
-                    : Image.file(File(_originalXFile!.path), fit: BoxFit.contain, errorBuilder: (c,e,s) => const Center(child: Text("Error displaying image")))
+                    ? Image.network(_originalXFile!.path, fit: BoxFit.contain, errorBuilder: (c,e,s){ print("Error displaying original web image: $e"); return const Center(child: Text("Error displaying image"));})
+                    : Image.file(File(_originalXFile!.path), fit: BoxFit.contain, errorBuilder: (c,e,s){ print("Error displaying original file image: $e"); return const Center(child: Text("Error displaying image"));})
               )),
               const SizedBox(height: 10),
               const CircularProgressIndicator(),
               const SizedBox(height: 10),
-              const Text("Removing background & enhancing..."),
+              const Text("Processing Image..."),
             ],
           );
         }
-        return const Column(mainAxisAlignment: MainAxisAlignment.center, children: [CircularProgressIndicator(), SizedBox(height: 10), Text("Removing background & enhancing...")]);
+        return const Column(mainAxisAlignment: MainAxisAlignment.center, children: [CircularProgressIndicator(), SizedBox(height: 10), Text("Processing Image...")]);
       
-      case ScannerProcessStatus.processingSupabaseAI:
-        return Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            if (_processedImageBytes != null) 
-              Expanded(child: Padding(padding: const EdgeInsets.all(8.0), child: Image.memory(_processedImageBytes!, fit: BoxFit.contain))),
-            const SizedBox(height: 10),
-            const CircularProgressIndicator(),
-            const SizedBox(height: 10),
-            const Text("Identifying pin with Cloud Vision..."),
-          ],
-        );
       case ScannerProcessStatus.saving:
         return const Column(mainAxisAlignment: MainAxisAlignment.center, children: [CircularProgressIndicator(), SizedBox(height: 10), Text("Saving pin...")]);
 
-      case ScannerProcessStatus.imageSelected:
+      case ScannerProcessStatus.imageSelected: // Shows original before Python API call starts
         if (_originalXFile != null) {
           return kIsWeb
               ? Image.network(_originalXFile!.path, fit: BoxFit.contain, errorBuilder: (c,e,s) => const Center(child: Text("Error displaying image")))
@@ -534,71 +390,28 @@ class _ScannerPageState extends State<ScannerPage> {
         }
         return const Text('Tap Capture or Gallery.');
 
-      case ScannerProcessStatus.pythonAPIProcessed:
-      case ScannerProcessStatus.showingSuggestions:
-      case ScannerProcessStatus.manualEntry:
+      case ScannerProcessStatus.manualEntry: 
       case ScannerProcessStatus.error:
         if (_processedImageBytes != null) {
-          return Image.memory(_processedImageBytes!, fit: BoxFit.contain, errorBuilder: (c,e,s) => const Center(child: Text("Error displaying processed image")));
-        } else if (_originalXFile != null) { 
+           print('BUILD_PREVIEW: Attempting to display processed image with Image.memory(). Byte length: ${_processedImageBytes!.length}');
+          return Image.memory(_processedImageBytes!, fit: BoxFit.contain, errorBuilder: (c,e,s) {
+            print('BUILD_PREVIEW: ErrorBuilder for Image.memory(): $e');
+            return const Center(child: Text("Error displaying processed image"));
+          });
+        } else if (_originalXFile != null && _status == ScannerProcessStatus.error) { 
+           print('BUILD_PREVIEW: Error status, showing original image as fallback.');
            return kIsWeb
               ? Image.network(_originalXFile!.path, fit: BoxFit.contain, errorBuilder: (c,e,s) => const Center(child: Text("Error displaying original image")))
               : Image.file(File(_originalXFile!.path), fit: BoxFit.contain, errorBuilder: (c,e,s) => const Center(child: Text("Error displaying original image")));
         }
-        return const Text('No image to display. Tap Capture or Gallery.');
-      default:
+        return Text(_errorMessage ?? 'No image to display. Tap Capture or Gallery.');
+      default: 
         return const Text('Please capture or select an image.');
     }
   }
 
-  Widget _buildSuggestionsSection() {
-    if (!(_isSmartScanEnabled && _status == ScannerProcessStatus.showingSuggestions && _suggestedImageUrls.isNotEmpty)) {
-      return const SizedBox.shrink();
-    }
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text("Suggested High-Res Images:", style: TextStyle(fontWeight: FontWeight.bold)),
-        const SizedBox(height: 8),
-        SizedBox(
-          height: 120,
-          child: ListView.builder(
-            scrollDirection: Axis.horizontal,
-            itemCount: _suggestedImageUrls.length,
-            itemBuilder: (context, index) {
-              final url = _suggestedImageUrls[index];
-              bool isSelected = url == _selectedHiResImageUrl;
-              return Padding(
-                padding: const EdgeInsets.only(right: 8.0),
-                child: InkWell(
-                  onTap: () { setState(() { _selectedHiResImageUrl = url; }); },
-                  child: Container(
-                    width: 120,
-                    decoration: BoxDecoration(
-                      border: Border.all(color: isSelected ? Theme.of(context).colorScheme.primary : Colors.transparent, width: 3),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(isSelected ? 5 : 8),
-                      child: Image.network(url, fit: BoxFit.cover,
-                        loadingBuilder: (c, child, progress) => progress == null ? child : const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-                        errorBuilder: (c,e,s) => Container(width: 100, height: 100, color: Colors.grey[200], child: const Icon(Icons.broken_image)),
-                      ),
-                    ),
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-        const SizedBox(height: 10),
-      ],
-    );
-  }
-
   Widget _buildPinDetailsForm() {
-    if (!((_isSmartScanEnabled && _status == ScannerProcessStatus.showingSuggestions) || 
-          (!_isSmartScanEnabled && _status == ScannerProcessStatus.manualEntry && _processedImageBytes != null))) {
+    if (!(_status == ScannerProcessStatus.manualEntry && _processedImageBytes != null)) {
         return const SizedBox.shrink();
     }
     return Column(
@@ -607,21 +420,15 @@ class _ScannerPageState extends State<ScannerPage> {
         TextFormField(controller: _pinNameController, decoration: const InputDecoration(labelText: 'Pin Name', border: OutlineInputBorder())),
         const SizedBox(height: 10),
         TextFormField(controller: _seriesController, decoration: const InputDecoration(labelText: 'Series', border: OutlineInputBorder())),
-        const SizedBox(height: 10),
-        TextFormField(controller: _releaseDateController, decoration: const InputDecoration(labelText: 'Release Date', border: OutlineInputBorder())),
-        const SizedBox(height: 10),
-        TextFormField(controller: _originController, decoration: const InputDecoration(labelText: 'Origin (e.g., Park, Event)', border: OutlineInputBorder())),
-        const SizedBox(height: 10),
-        TextFormField(controller: _avgPriceController, decoration: const InputDecoration(labelText: 'Average Selling Price (Optional)', border: OutlineInputBorder()), keyboardType: TextInputType.number),
+        // Removed: Release Date, Origin, Avg Price
       ],
     );
   }
 
   Widget _buildActionButtons() {
-    final bool isProcessingAnyAPI = _status == ScannerProcessStatus.processingPythonAPI ||
-                                  _status == ScannerProcessStatus.processingSupabaseAI ||
-                                  _status == ScannerProcessStatus.initializingCamera ||
-                                  _status == ScannerProcessStatus.saving;
+    final bool isProcessing = _status == ScannerProcessStatus.processingPythonAPI ||
+                                  _status == ScannerProcessStatus.saving ||
+                                  _status == ScannerProcessStatus.initializingCamera;
 
     if (_status == ScannerProcessStatus.cameraPreview || _status == ScannerProcessStatus.noCamera || _status == ScannerProcessStatus.initializingCamera) {
       return Row(
@@ -631,7 +438,7 @@ class _ScannerPageState extends State<ScannerPage> {
             child: ElevatedButton.icon(
               icon: const Icon(Icons.camera_alt),
               label: const Text('Capture'),
-              onPressed: isProcessingAnyAPI || (_status == ScannerProcessStatus.noCamera && !kIsWeb && _cameraController == null) ? null : _captureWithCamera,
+              onPressed: isProcessing || (_status == ScannerProcessStatus.noCamera && !kIsWeb && _cameraController == null) ? null : _captureWithCamera,
             ),
           ),
           const SizedBox(width: 10),
@@ -639,32 +446,29 @@ class _ScannerPageState extends State<ScannerPage> {
             child: ElevatedButton.icon(
               icon: const Icon(Icons.photo_library),
               label: const Text('Gallery'),
-              onPressed: isProcessingAnyAPI ? null : () => _pickImageUsingPicker(ImageSource.gallery),
+              onPressed: isProcessing ? null : () => _pickImageUsingPicker(ImageSource.gallery),
             ),
           ),
         ],
       );
-    } else if (_status == ScannerProcessStatus.showingSuggestions ||
-               _status == ScannerProcessStatus.manualEntry ||
-               _status == ScannerProcessStatus.pythonAPIProcessed ||
-               _status == ScannerProcessStatus.imageSelected || 
+    } else if (_status == ScannerProcessStatus.manualEntry ||
+               _status == ScannerProcessStatus.imageSelected || // User might want to reset even if original is just shown
                _status == ScannerProcessStatus.error) {
         return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-                if ((_isSmartScanEnabled && _status == ScannerProcessStatus.showingSuggestions) || 
-                    (!_isSmartScanEnabled && _status == ScannerProcessStatus.manualEntry && _processedImageBytes != null))
+                if (_status == ScannerProcessStatus.manualEntry && _processedImageBytes != null)
                     ElevatedButton.icon(
                         icon: const Icon(Icons.save_alt_outlined),
                         label: const Text('Save Pin to Collection'),
-                        onPressed: isProcessingAnyAPI ? null : _savePin,
+                        onPressed: isProcessing ? null : _savePin,
                         style: ElevatedButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.primary, foregroundColor: Theme.of(context).colorScheme.onPrimary),
                     ),
                 const SizedBox(height: 10),
                 OutlinedButton.icon(
                     icon: const Icon(Icons.refresh),
                     label: const Text('Scan/Upload New Pin'),
-                    onPressed: isProcessingAnyAPI ? null : _resetScannerState,
+                    onPressed: isProcessing ? null : _resetScannerState,
                 ),
             ],
         );
