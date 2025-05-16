@@ -9,6 +9,7 @@ import 'community_page.dart';
 import 'marketplace_page.dart';
 import 'settings_page.dart';
 import 'user_profile_page.dart'; // Ensure UserProfilePage is imported
+import 'search_results_page.dart'; // This import requires search_results_page.dart to exist in lib/screens/
 
 final supabase = Supabase.instance.client;
 
@@ -21,7 +22,8 @@ enum ProfileMenuAction { myProfile, myMarket, settings, logout }
 class MainAppShell extends StatefulWidget {
   const MainAppShell({super.key});
 
-  // << --- NEW: Define a constant for the user profile route name --- >>
+  // Define a constant for the user profile route name.
+  // This helps in identifying the route reliably.
   static const String userProfileRouteName = '/user_profile_page';
 
   @override
@@ -48,12 +50,19 @@ class _MainAppShellState extends State<MainAppShell> {
   @override
   void initState() {
     super.initState();
-    _fetchUserProfileAvatar(); // Renamed for clarity
+    _fetchUserProfileAvatar();
 
     _authStateSubscription = supabase.auth.onAuthStateChange.listen((data) {
       final AuthChangeEvent event = data.event;
       if (event == AuthChangeEvent.signedIn || event == AuthChangeEvent.signedOut || event == AuthChangeEvent.userUpdated) {
-        _fetchUserProfileAvatar(); // Refresh avatar on auth changes
+        _fetchUserProfileAvatar();
+      }
+    });
+
+    // Listen to changes in search controller to show/hide clear button
+    _searchController.addListener(() {
+      if (mounted) {
+        setState(() {}); // Rebuild to update suffix icon
       }
     });
   }
@@ -116,11 +125,9 @@ class _MainAppShellState extends State<MainAppShell> {
       context,
       MaterialPageRoute(builder: (context) => const ScannerPage()),
     ).then((_) {
-      if (_selectedIndex == 1 && _widgetOptions[1] is MyPinsPage) {
-        // If MyPinsPage has a refresh method, you could call it here.
-        // Example: (_widgetOptions[1] as MyPinsPage).refreshPins();
-        // This requires MyPinsPage to expose such a method.
-        // For simplicity, often a state management solution or passing a callback is used.
+      // Optional: refresh data if needed after scanner page
+      if (mounted) {
+        setState(() {});
       }
     });
   }
@@ -128,22 +135,31 @@ class _MainAppShellState extends State<MainAppShell> {
   void _handleProfileMenuSelection(ProfileMenuAction action) {
     switch (action) {
       case ProfileMenuAction.myProfile:
-        // << --- MODIFIED: Add RouteSettings when navigating --- >>
         Navigator.push(
             context,
             MaterialPageRoute(
-                builder: (context) => const UserProfilePage(), // Assuming it takes no arguments for self-profile
+                builder: (context) => const UserProfilePage(), 
                 settings: const RouteSettings(name: MainAppShell.userProfileRouteName),
             )
-        );
+        ).then((_) {
+          if (mounted) {
+            setState(() {});
+          }
+        });
         break;
       case ProfileMenuAction.myMarket:
-        if (_selectedIndex != 3) { // Assuming Marketplace is at index 3
+        if (_selectedIndex != 3) { 
           _onItemTapped(3);
         }
         break;
       case ProfileMenuAction.settings:
-        Navigator.push(context, MaterialPageRoute(builder: (context) => const SettingsPage()));
+        Navigator.push(context, MaterialPageRoute(builder: (context) => const SettingsPage()))
+        .then((_){
+           if (mounted) {
+            _fetchUserProfileAvatar(); 
+            setState(() {}); 
+          }
+        });
         break;
       case ProfileMenuAction.logout:
         _handleLogout();
@@ -155,7 +171,6 @@ class _MainAppShellState extends State<MainAppShell> {
     try {
       await supabase.auth.signOut();
       if (mounted) {
-        // Ensure you have an '/authGate' route defined in your MaterialApp
         Navigator.of(context).pushNamedAndRemoveUntil('/authGate', (route) => false);
       }
     } catch (e) {
@@ -179,9 +194,30 @@ class _MainAppShellState extends State<MainAppShell> {
     }
   }
 
+  void _onSearchSubmitted(String query) {
+    if (query.trim().isNotEmpty) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => SearchResultsPage(searchQuery: query.trim()),
+        ),
+      ).then((_) {
+          if (mounted) {
+            setState(() {}); 
+          }
+        });
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Please enter something to search.")),
+      );
+    }
+  }
+
+
   @override
   void dispose() {
     _pageController.dispose();
+    _searchController.removeListener(() { if (mounted) setState(() {}); }); 
     _searchController.dispose();
     _authStateSubscription.cancel();
     super.dispose();
@@ -193,31 +229,44 @@ class _MainAppShellState extends State<MainAppShell> {
     final safeAreaTopPadding = MediaQuery.of(context).padding.top;
 
     const double standardAppBarHeight = kToolbarHeight;
-    const double extraAppBarHeight = 24.0; // For the title area below icons
+    const double extraAppBarHeight = 24.0; 
     const double totalAppBarAreaHeight = standardAppBarHeight + extraAppBarHeight;
     const double searchBarHeight = 48.0;
 
     const Color customAppBarColor = appPrimaryColor;
 
-    // << --- NEW LOGIC to determine if UserProfilePage is active --- >>
     final ModalRoute<dynamic>? currentRoute = ModalRoute.of(context);
     final bool isUserProfilePageActive = currentRoute?.settings.name == MainAppShell.userProfileRouteName;
-    // The shell's custom AppBar and search bar should only be shown if UserProfilePage is NOT active.
-    final bool shouldShowShellAppBarAndSearch = !isUserProfilePageActive;
-    // << --- END NEW LOGIC --- >>
+    
+    // More robust check for SearchResultsPage being active
+    bool isSearchResultsPageActive = false;
+    if (currentRoute is MaterialPageRoute) {
+        // Check the type of the widget built by the route's builder
+        // This requires SearchResultsPage to be correctly imported and recognized as a type.
+        // If SearchResultsPage is not found due to import errors, this check might not work as expected.
+        try {
+           final widget = currentRoute.builder(context);
+           if (widget is SearchResultsPage) {
+             isSearchResultsPageActive = true;
+           }
+        } catch (e) {
+          // Catch potential errors if SearchResultsPage type check fails due to import issues
+          print("Error checking route type for SearchResultsPage: $e");
+        }
+    }
 
-    // Adjust PageView top based on whether the shell's app bar is shown
-    // When UserProfilePage is active, it will handle its own layout from the top.
+
+    final bool shouldShowShellAppBarAndSearch = !isUserProfilePageActive && !isSearchResultsPageActive;
+    
     final double pageViewTopWhenShellAppBarVisible = safeAreaTopPadding + totalAppBarAreaHeight + (searchBarHeight / 2) + 8.0;
     final double pageViewTop = shouldShowShellAppBarAndSearch
         ? pageViewTopWhenShellAppBarVisible
-        : 0; // If shell app bar is hidden, PageView is effectively behind UserProfilePage.
+        : 0; 
 
     return Scaffold(
-      extendBodyBehindAppBar: true, // Allows body to draw behind the custom AppBar area
+      extendBodyBehindAppBar: true, 
       body: Stack(
         children: [
-          // PageView for main tab content
           Positioned.fill(
             top: pageViewTop,
             child: PageView(
@@ -225,33 +274,31 @@ class _MainAppShellState extends State<MainAppShell> {
               onPageChanged: (index) {
                 setState(() { _selectedIndex = index; });
               },
-              children: _widgetOptions, // Use the static final list
+              children: _widgetOptions,
             ),
           ),
 
-          // Conditionally build the Shell's custom AppBar background
           if (shouldShowShellAppBarAndSearch)
             Positioned(
               top: 0,
               left: 0,
               right: 0,
-              height: safeAreaTopPadding + totalAppBarAreaHeight, // Covers status bar and custom app bar area
+              height: safeAreaTopPadding + totalAppBarAreaHeight, 
               child: Container(
-                color: customAppBarColor,
+                color: customAppBarColor, 
               ),
             ),
 
-          // Conditionally build the Shell's AppBar widget (title, actions)
           if (shouldShowShellAppBarAndSearch)
             Positioned(
-              top: safeAreaTopPadding, // Position below status bar
+              top: safeAreaTopPadding, 
               left: 0,
               right: 0,
-              height: totalAppBarAreaHeight, // Height of the interactive AppBar part
+              height: totalAppBarAreaHeight, 
               child: AppBar(
-                backgroundColor: Colors.transparent, // Background is handled by the Container above
-                foregroundColor: Colors.white, // Color for icons and text
-                elevation: 0, // No shadow as it's part of a custom stack
+                backgroundColor: Colors.transparent, 
+                foregroundColor: Colors.white, 
+                elevation: 0, 
                 title: Text(
                   _getAppBarTitle(_selectedIndex),
                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 22),
@@ -274,17 +321,17 @@ class _MainAppShellState extends State<MainAppShell> {
                   ),
                   PopupMenuButton<ProfileMenuAction>(
                     onSelected: _handleProfileMenuSelection,
-                    offset: const Offset(0, kToolbarHeight - 10),
-                    icon: _isLoadingAvatar
+                    offset: const Offset(0, kToolbarHeight - 10), 
+                    icon: _isLoadingAvatar 
                         ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                         : CircleAvatar(
-                            radius: 16,
-                            backgroundColor: Colors.white.withOpacity(0.3),
+                            radius: 16, 
+                            backgroundColor: Colors.white.withOpacity(0.3), 
                             backgroundImage: _userAvatarUrl != null && _userAvatarUrl!.isNotEmpty
                                 ? NetworkImage(_userAvatarUrl!)
                                 : null,
                             child: (_userAvatarUrl == null || _userAvatarUrl!.isEmpty)
-                                ? const Icon(Icons.person_outline, size: 22, color: Colors.white)
+                                ? const Icon(Icons.person_outline, size: 22, color: Colors.white) 
                                 : null,
                           ),
                     itemBuilder: (BuildContext context) => <PopupMenuEntry<ProfileMenuAction>>[
@@ -308,22 +355,21 @@ class _MainAppShellState extends State<MainAppShell> {
                     ],
                     tooltip: "Profile Options",
                   ),
-                  const SizedBox(width: 8), // Padding for the last icon
+                  const SizedBox(width: 8),
                 ],
               ),
             ),
-
-          // Conditionally build the Shell's Search Bar
+          
           if (shouldShowShellAppBarAndSearch)
             Positioned(
-              top: safeAreaTopPadding + totalAppBarAreaHeight - (searchBarHeight / 2), // Overlaps bottom of AppBar area
+              top: safeAreaTopPadding + totalAppBarAreaHeight - (searchBarHeight / 2), 
               left: 16.0,
               right: 16.0,
               height: searchBarHeight,
               child: Container(
                 decoration: BoxDecoration(
-                  color: theme.cardColor, // Use theme's card color for search bar background
-                  borderRadius: BorderRadius.circular(searchBarHeight / 2), // Fully rounded
+                  color: theme.cardColor, 
+                  borderRadius: BorderRadius.circular(searchBarHeight / 2), 
                   boxShadow: [
                     BoxShadow(
                       color: Colors.black.withOpacity(0.15),
@@ -335,18 +381,28 @@ class _MainAppShellState extends State<MainAppShell> {
                 child: TextField(
                   controller: _searchController,
                   decoration: InputDecoration(
-                    hintText: 'Search for something new...',
+                    hintText: 'Search users, pins, etc...',
                     hintStyle: TextStyle(color: theme.hintColor.withOpacity(0.6), fontSize: 14),
                     prefixIcon: Icon(Icons.search, color: theme.iconTheme.color?.withOpacity(0.8), size: 20),
-                    suffixIcon: IconButton(
-                      icon: Icon(Icons.filter_list, color: theme.iconTheme.color?.withOpacity(0.8), size: 20),
-                      onPressed: () { print("Filter tapped"); }, // Placeholder action
-                      tooltip: 'Filter',
-                    ),
-                    border: InputBorder.none, // Remove default border
-                    contentPadding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 5.0), // Adjust padding
+                    suffixIcon: _searchController.text.isNotEmpty
+                        ? IconButton(
+                            icon: Icon(Icons.clear, color: theme.iconTheme.color?.withOpacity(0.8), size: 20),
+                            onPressed: () {
+                              _searchController.clear();
+                            },
+                            tooltip: 'Clear search',
+                          )
+                        : IconButton( 
+                            icon: Icon(Icons.filter_list, color: theme.iconTheme.color?.withOpacity(0.8), size: 20),
+                            onPressed: () { print("Filter tapped"); }, 
+                            tooltip: 'Filter',
+                          ),
+                    border: InputBorder.none, 
+                    contentPadding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 5.0), 
                   ),
                   style: TextStyle(color: theme.textTheme.bodyLarge?.color, fontSize: 14),
+                  onSubmitted: _onSearchSubmitted,
+                  textInputAction: TextInputAction.search,
                 ),
               ),
             ),
@@ -355,28 +411,26 @@ class _MainAppShellState extends State<MainAppShell> {
       floatingActionButton: FloatingActionButton(
         onPressed: _onScannerButtonPressed,
         tooltip: 'Scan Pin',
-        backgroundColor: customAppBarColor, // Match AppBar color
+        backgroundColor: customAppBarColor, 
         foregroundColor: Colors.white,
         elevation: 4.0,
-        shape: const CircleBorder(
-          // side: BorderSide(color: Colors.white, width: 2.0), // Optional: white border
-        ),
+        shape: const CircleBorder(),
         child: const Icon(
-          Icons.camera, // Changed from Icons.qr_code_scanner for a more general "scan" feel
+          Icons.camera, 
           size: 30.0,
         ),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
       bottomNavigationBar: BottomAppBar(
         shape: const CircularNotchedRectangle(),
-        notchMargin: 8.0, // Space for the FAB
-        elevation: 8.0, // Standard elevation
+        notchMargin: 8.0,
+        elevation: 8.0,
         child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround, // Distribute items evenly
+          mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: <Widget>[
             _buildBottomNavItem(icon: Icons.dashboard_outlined, activeIcon: Icons.dashboard, label: 'Dashboard', index: 0),
             _buildBottomNavItem(icon: Icons.style_outlined, activeIcon: Icons.style, label: 'My Pins', index: 1),
-            const SizedBox(width: 48), // The space for the FAB notch
+            const SizedBox(width: 48), 
             _buildBottomNavItem(icon: Icons.people_outline, activeIcon: Icons.people, label: 'Community', index: 2),
             _buildBottomNavItem(icon: Icons.storefront_outlined, activeIcon: Icons.storefront, label: 'Pin Market', index: 3),
           ],
@@ -388,27 +442,27 @@ class _MainAppShellState extends State<MainAppShell> {
   Widget _buildBottomNavItem({required IconData icon, IconData? activeIcon, required String label, required int index}) {
     final bool isSelected = (index == _selectedIndex);
     final color = isSelected ? appPrimaryColor : Theme.of(context).colorScheme.onSurface.withOpacity(0.7);
-    final selectedIcon = activeIcon ?? icon; // Use activeIcon if provided and selected
+    final selectedIcon = activeIcon ?? icon;
 
     return Expanded(
       child: InkWell(
         onTap: () => _onItemTapped(index),
-        customBorder: const CircleBorder(), // Makes the ripple effect circular
+        customBorder: const CircleBorder(),
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4.0), // Reduced vertical padding for a more compact look
+          padding: const EdgeInsets.symmetric(vertical: 4.0), 
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              Icon(isSelected ? selectedIcon : icon, color: color, size: 24), // Icon
-              const SizedBox(height: 2), // Spacing between icon and label
+              Icon(isSelected ? selectedIcon : icon, color: color, size: 24),
+              const SizedBox(height: 2), 
               Text(
                 label,
                 style: TextStyle(
-                  fontSize: 10, // Slightly smaller font for label
+                  fontSize: 10,
                   color: color,
                   fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                 ),
-                overflow: TextOverflow.ellipsis, // Prevent text overflow
+                overflow: TextOverflow.ellipsis,
               ),
             ],
           ),
@@ -417,14 +471,13 @@ class _MainAppShellState extends State<MainAppShell> {
     );
   }
 
-  // Helper to get AppBar title based on selected index
   String _getAppBarTitle(int index) {
     switch (index) {
       case 0: return 'Dashboard';
-      case 1: return 'My Collection'; // Changed from 'My Pins' for consistency with label
+      case 1: return 'My Collection'; 
       case 2: return 'Community';
       case 3: return 'Pin Market';
-      default: return 'PinSpace'; // Default title
+      default: return 'PinSpace';
     }
   }
 }

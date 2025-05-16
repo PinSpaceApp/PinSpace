@@ -12,42 +12,65 @@ final supabase = Supabase.instance.client;
 
 const Color profileAccentColor = Color(0xFFFFC107);
 
-// --- Placeholder Pin Model (Ensure this or your actual model is available) ---
+// Enum for Pin Status
+enum PinStatus { inCollection, forTrade }
+
+// --- Updated Pin Model ---
 class Pin {
   final String id;
   final String userId;
   final String? imageUrl;
   final String? title;
+  final PinStatus status;
 
   Pin({
     required this.id,
     required this.userId,
     this.imageUrl,
     this.title,
+    this.status = PinStatus.inCollection,
   });
 
   factory Pin.fromMap(Map<String, dynamic> map) {
+    String statusString = map['status'] as String? ?? "In Collection";
+    PinStatus currentStatus = PinStatus.inCollection;
+    if (statusString.toLowerCase() == "for trade") {
+      currentStatus = PinStatus.forTrade;
+    }
+
     return Pin(
-      id: map['id'] as String,
+      id: map['id'].toString(),
       userId: map['user_id'] as String,
       imageUrl: map['image_url'] as String?,
-      title: map['title'] as String?,
+      title: map['name'] as String?,
+      status: currentStatus,
     );
   }
+
+  String get statusDisplay {
+    switch (status) {
+      case PinStatus.inCollection:
+        return "In Collection";
+      case PinStatus.forTrade:
+        return "For Trade";
+      default:
+        return "In Collection";
+    }
+  }
 }
-// --- End Placeholder Pin Model ---
+// --- End Updated Pin Model ---
 
 // --- Updated ActivityPost Model ---
 class ActivityPost {
   final String id;
-  final String userId; // ID of the user who made the post
-  final String? userName; // Name of the user who made the post
-  final String? userAvatarUrl; // Avatar of the user who made the post
+  final String userId;
+  final String? userName;
+  final String? userAvatarUrl;
   final String content;
   final DateTime createdAt;
   int likesCount;
   int commentsCount;
-  bool isLikedByCurrentUser; // To toggle like state
+  bool isLikedByCurrentUser;
 
   ActivityPost({
     required this.id,
@@ -63,6 +86,8 @@ class ActivityPost {
 }
 // --- End Updated ActivityPost Model ---
 
+// Enum for Pins Tab View Mode
+enum PinsViewMode { all, sets }
 
 class UserProfilePage extends StatefulWidget {
   final String? profileUserId;
@@ -74,28 +99,30 @@ class UserProfilePage extends StatefulWidget {
 }
 
 class _UserProfilePageState extends State<UserProfilePage> with SingleTickerProviderStateMixin {
-  Profile? _userProfile; // The profile being viewed
+  Profile? _userProfile;
   bool _isLoadingProfile = true;
   String? _profileError;
 
   List<Pin> _userPins = [];
   bool _isLoadingPins = true;
   String? _pinsError;
+  PinsViewMode _pinsViewMode = PinsViewMode.all;
 
   List<ActivityPost> _userActivity = [];
   bool _isLoadingActivity = true;
   String? _activityError;
 
   late TabController _tabController;
-  String? _currentAuthUserId; // The ID of the currently logged-in user
+  String? _currentAuthUserId;
 
-  // --- Style Adjustments ---
+  bool _isFollowing = false;
+  bool _isLoadingFollowStatus = false;
+
   static const double coverPhotoHeight = 150.0;
   static const double avatarRadius = 45.0;
   static const double avatarBorderWidth = 2.0;
-  static const double avatarOverlap = avatarRadius * 0.3; 
+  static const double avatarOverlap = avatarRadius * 0.3;
   static const double tabIconSize = 22.0;
-  // --- End Style Adjustments ---
 
 
   @override
@@ -117,17 +144,18 @@ class _UserProfilePageState extends State<UserProfilePage> with SingleTickerProv
 
   Future<void> _fetchUserProfile() async {
     if (!mounted) return;
-    if (_targetUserId.isEmpty && widget.profileUserId == null) {
+    if (_targetUserId.isEmpty) {
         setState(() {
             _isLoadingProfile = false;
-            _profileError = "Cannot load profile: User ID not specified and no user is logged in.";
+            _profileError = "Cannot load profile: User ID not available.";
         });
         return;
     }
-    setState(() { /* Reset loading states */
+    setState(() {
       _isLoadingProfile = true; _profileError = null;
       _isLoadingPins = true; _userPins = []; _pinsError = null;
       _isLoadingActivity = true; _userActivity = []; _activityError = null;
+      _isLoadingFollowStatus = !_isCurrentUserProfile;
     });
 
     try {
@@ -138,18 +166,77 @@ class _UserProfilePageState extends State<UserProfilePage> with SingleTickerProv
         if (_userProfile != null) {
           _fetchUserPins(_userProfile!.id);
           _fetchUserActivity(_userProfile!.id);
+          if (!_isCurrentUserProfile) {
+            _checkFollowStatus();
+          }
         }
       } else {
         _profileError = "Profile not found for ID: $_targetUserId.";
       }
-      setState(() { _isLoadingProfile = false; });
     } catch (e) {
       if (!mounted) return;
       print('Error fetching user profile: $e');
-      setState(() {
-        _profileError = "Failed to load profile: ${e.toString()}";
-        _isLoadingProfile = false; _isLoadingPins = false; _isLoadingActivity = false;
-      });
+      _profileError = "Failed to load profile: ${e.toString()}";
+    } finally {
+        if(mounted) {
+            setState(() { _isLoadingProfile = false; });
+        }
+    }
+  }
+
+  Future<void> _checkFollowStatus() async {
+    if (!mounted || _currentAuthUserId == null || _targetUserId.isEmpty || _isCurrentUserProfile) {
+      if (mounted) setState(() => _isLoadingFollowStatus = false);
+      return;
+    }
+    if (mounted) setState(() => _isLoadingFollowStatus = true);
+    try {
+      final response = await supabase
+          .from('user_follows')
+          .select('id')
+          .eq('follower_id', _currentAuthUserId!)
+          .eq('following_id', _targetUserId)
+          .maybeSingle();
+
+      if (mounted) {
+        setState(() {
+          _isFollowing = response != null;
+          _isLoadingFollowStatus = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        print('Error checking follow status: $e');
+        setState(() => _isLoadingFollowStatus = false);
+      }
+    }
+  }
+
+  Future<void> _toggleFollow() async {
+    if (!mounted || _currentAuthUserId == null || _targetUserId.isEmpty || _isCurrentUserProfile || _isLoadingFollowStatus) return;
+
+    if (mounted) setState(() => _isLoadingFollowStatus = true);
+    
+    final currentlyFollowing = _isFollowing;
+    if (mounted) setState(() => _isFollowing = !currentlyFollowing);
+
+    try {
+      if (currentlyFollowing) {
+        await supabase.from('user_follows').delete().match({'follower_id': _currentAuthUserId!, 'following_id': _targetUserId});
+      } else {
+        await supabase.from('user_follows').insert({'follower_id': _currentAuthUserId!, 'following_id': _targetUserId});
+      }
+      if(mounted) setState(() => _isLoadingFollowStatus = false);
+
+    } catch (e) {
+      if (mounted) {
+        print('Error toggling follow: $e');
+        setState(() {
+          _isFollowing = currentlyFollowing; 
+          _isLoadingFollowStatus = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to update follow status: ${e.toString()}'), backgroundColor: Colors.red));
+      }
     }
   }
 
@@ -157,13 +244,12 @@ class _UserProfilePageState extends State<UserProfilePage> with SingleTickerProv
     if (!mounted) return;
     setState(() { _isLoadingPins = true; _pinsError = null; });
     try {
-      final response = await supabase.from('pins').select().eq('user_id', userId);
+      final response = await supabase.from('pins').select('id, user_id, image_url, name, status').eq('user_id', userId);
       if (!mounted) return;
       final List<dynamic> data = response as List<dynamic>;
       _userPins = data.map((map) => Pin.fromMap(map as Map<String, dynamic>)).toList();
     } catch (e) {
       if (!mounted) return;
-      print('Error fetching user pins: $e');
       _pinsError = "Failed to load pins: ${e.toString()}";
     } finally {
       if (mounted) setState(() { _isLoadingPins = false; });
@@ -174,7 +260,7 @@ class _UserProfilePageState extends State<UserProfilePage> with SingleTickerProv
     if (!mounted) return;
     setState(() { _isLoadingActivity = true; _activityError = null; });
     try {
-      await Future.delayed(const Duration(milliseconds: 800)); // Simulate fetch
+      await Future.delayed(const Duration(milliseconds: 800));
       if (!mounted) return;
       List<ActivityPost> fetchedActivities = [];
       if (_userProfile != null) {
@@ -192,7 +278,6 @@ class _UserProfilePageState extends State<UserProfilePage> with SingleTickerProv
     }
   }
 
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -203,39 +288,24 @@ class _UserProfilePageState extends State<UserProfilePage> with SingleTickerProv
         children: <Widget>[
           _buildFixedHeader(context, theme, statusBarHeight),
           Container(
-            decoration: BoxDecoration(
-              color: Theme.of(context).scaffoldBackgroundColor,
-              border: Border(bottom: BorderSide(color: Colors.grey[300]!, width: 0.8))
-            ),
+            decoration: BoxDecoration(color: Theme.of(context).scaffoldBackgroundColor, border: Border(bottom: BorderSide(color: Colors.grey[300]!, width: 0.8))),
             child: TabBar(
-              controller: _tabController,
-              labelColor: theme.colorScheme.primary,
-              unselectedLabelColor: Colors.grey[600],
-              indicatorColor: profileAccentColor,
-              indicatorWeight: 3.0,
-              isScrollable: false,
-              tabAlignment: TabAlignment.fill, 
-              labelPadding: EdgeInsets.symmetric(horizontal: 4.0), 
+              controller: _tabController, labelColor: theme.colorScheme.primary, unselectedLabelColor: Colors.grey[600], indicatorColor: profileAccentColor, indicatorWeight: 3.0,
+              isScrollable: false, tabAlignment: TabAlignment.fill, labelPadding: EdgeInsets.symmetric(horizontal: 4.0),
               tabs: const [
-                Tab(icon: Icon(Icons.timeline_outlined, size: tabIconSize), text: "Activity"),
-                Tab(icon: Icon(Icons.push_pin_outlined, size: tabIconSize), text: "Pins"),
-                Tab(icon: Icon(Icons.swap_horiz_outlined, size: tabIconSize), text: "For Trade"),
-                Tab(icon: Icon(Icons.favorite_border_outlined, size: tabIconSize), text: "Wishlist"),
+                Tab(icon: Icon(Icons.timeline_outlined, size: tabIconSize), text: "Activity"), Tab(icon: Icon(Icons.push_pin_outlined, size: tabIconSize), text: "Pins"),
+                Tab(icon: Icon(Icons.swap_horiz_outlined, size: tabIconSize), text: "For Trade"), Tab(icon: Icon(Icons.favorite_border_outlined, size: tabIconSize), text: "Wishlist"),
                 Tab(icon: Icon(Icons.emoji_events_outlined, size: tabIconSize), text: "Trophies"),
               ],
             ),
           ),
           Expanded(
-            child: TabBarView(
-              controller: _tabController,
-              children: [
-                _buildActivityTab(context, theme),
-                _buildPinsTab(context),
-                _buildContentPlaceholder("For Trade - Coming Soon!", Icons.swap_horiz, theme),
-                _buildContentPlaceholder("My Wishlist - Coming Soon!", Icons.favorite_border_outlined, theme),
-                _buildContentPlaceholder("My Trophies - Coming Soon!", Icons.emoji_events, theme),
-              ],
-            ),
+            child: TabBarView(controller: _tabController, children: [
+              _buildActivityTab(context, theme), _buildPinsTab(context, theme),
+              _buildContentPlaceholder("For Trade - Coming Soon!", Icons.swap_horiz, theme),
+              _buildContentPlaceholder("My Wishlist - Coming Soon!", Icons.favorite_border_outlined, theme),
+              _buildContentPlaceholder("My Trophies - Coming Soon!", Icons.emoji_events, theme),
+            ]),
           ),
         ],
       ),
@@ -243,39 +313,16 @@ class _UserProfilePageState extends State<UserProfilePage> with SingleTickerProv
   }
 
   Widget _buildFixedHeader(BuildContext context, ThemeData theme, double statusBarHeight) {
-    final double approxHeaderContentHeight = coverPhotoHeight + (avatarRadius * 2 * (1 - avatarOverlap/avatarRadius)) + 30; 
+    final double approxHeaderContentHeight = coverPhotoHeight + (avatarRadius * 2 * (1 - avatarOverlap/avatarRadius)) + 30;
     final double loadingErrorStateHeight = statusBarHeight + approxHeaderContentHeight;
 
+    if (_isLoadingProfile && _userProfile == null) return SizedBox(height: loadingErrorStateHeight, child: const Center(child: CircularProgressIndicator()));
+    if (_profileError != null && _userProfile == null) return Container(padding: EdgeInsets.only(top: statusBarHeight + 20, left: 16, right: 16, bottom: 20), height: loadingErrorStateHeight, alignment: Alignment.center, child: Text(_profileError!, style: TextStyle(color: theme.colorScheme.error, fontSize: 16), textAlign: TextAlign.center));
+    if (_userProfile == null) return Container(padding: EdgeInsets.only(top: statusBarHeight + 20, left: 16, right: 16, bottom: 20), height: loadingErrorStateHeight, alignment: Alignment.center, child: Text("Profile not available.", style: TextStyle(color: Colors.grey[700], fontSize: 16), textAlign: TextAlign.center));
 
-    if (_isLoadingProfile && _userProfile == null) {
-      return SizedBox(
-        height: loadingErrorStateHeight,
-        child: const Center(child: CircularProgressIndicator()),
-      );
-    }
-    if (_profileError != null && _userProfile == null) {
-      return Container(
-        padding: EdgeInsets.only(top: statusBarHeight + 20, left: 16, right: 16, bottom: 20),
-        height: loadingErrorStateHeight,
-        alignment: Alignment.center,
-        child: Text(_profileError!, style: TextStyle(color: theme.colorScheme.error, fontSize: 16), textAlign: TextAlign.center),
-      );
-    }
-    if (_userProfile == null) {
-      return Container(
-        padding: EdgeInsets.only(top: statusBarHeight + 20, left: 16, right: 16, bottom: 20),
-        height: loadingErrorStateHeight,
-        alignment: Alignment.center,
-        child: Text("Profile not available.", style: TextStyle(color: Colors.grey[700], fontSize: 16), textAlign: TextAlign.center),
-      );
-    }
-
-    ImageProvider? coverImgProvider = (_userProfile!.coverPhotoUrl != null && _userProfile!.coverPhotoUrl!.isNotEmpty)
-        ? NetworkImage(_userProfile!.coverPhotoUrl!) : null;
-    ImageProvider? avatarImgProvider = (_userProfile!.avatarUrl != null && _userProfile!.avatarUrl!.isNotEmpty)
-        ? NetworkImage(_userProfile!.avatarUrl!) : null;
+    ImageProvider? coverImgProvider = (_userProfile!.coverPhotoUrl != null && _userProfile!.coverPhotoUrl!.isNotEmpty) ? NetworkImage(_userProfile!.coverPhotoUrl!) : null;
+    ImageProvider? avatarImgProvider = (_userProfile!.avatarUrl != null && _userProfile!.avatarUrl!.isNotEmpty) ? NetworkImage(_userProfile!.avatarUrl!) : null;
     double usernameLeftOffset = 16.0 + (avatarRadius + avatarBorderWidth) * 2 + 12.0;
-
 
     return Container(
       padding: EdgeInsets.only(top: statusBarHeight),
@@ -287,198 +334,114 @@ class _UserProfilePageState extends State<UserProfilePage> with SingleTickerProv
             child: Stack(
               clipBehavior: Clip.none,
               children: <Widget>[
+                Positioned(top: 0, left: 0, right: 0, height: coverPhotoHeight, child: Container(decoration: BoxDecoration(color: Colors.grey[300], image: coverImgProvider != null ? DecorationImage(image: coverImgProvider, fit: BoxFit.cover) : null), child: coverImgProvider == null ? Icon(Icons.landscape_outlined, size: 70, color: Colors.grey[400]) : null)),
+                Positioned(top: 8.0, left: 8.0, child: InkWell(onTap: () { if (Navigator.of(context).canPop()) Navigator.of(context).pop(); }, customBorder: const CircleBorder(), child: Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: Colors.white.withOpacity(0.9), shape: BoxShape.circle, boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 3.0, offset: const Offset(0,1))]), child: Icon(Icons.arrow_back_ios_new_rounded, color: theme.colorScheme.primary, size: 18)))),
+                if (_isCurrentUserProfile) Positioned(top: 8.0, right: 8.0, child: InkWell(onTap: () { Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsPage())).then((_) => _fetchUserProfile()); }, customBorder: const CircleBorder(), child: Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: Colors.black.withOpacity(0.45), shape: BoxShape.circle), child: const Icon(Icons.settings_outlined, color: Colors.white, size: 20)))),
+                Positioned(top: coverPhotoHeight - avatarRadius - avatarOverlap, left: 16.0, child: Container(padding: const EdgeInsets.all(avatarBorderWidth), decoration: BoxDecoration(color: theme.scaffoldBackgroundColor, shape: BoxShape.circle, boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.12), blurRadius: 6.0, offset: const Offset(0, 3))]), child: CircleAvatar(radius: avatarRadius, backgroundColor: Colors.grey[400], backgroundImage: avatarImgProvider, child: avatarImgProvider == null ? Icon(Icons.person_outline, size: avatarRadius * 0.8, color: Colors.white70) : null))),
                 Positioned(
-                  top: 0, left: 0, right: 0, height: coverPhotoHeight,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: Colors.grey[300],
-                      image: coverImgProvider != null ? DecorationImage(image: coverImgProvider, fit: BoxFit.cover) : null,
-                    ),
-                    child: coverImgProvider == null ? Icon(Icons.landscape_outlined, size: 70, color: Colors.grey[400]) : null,
-                  ),
-                ),
-                Positioned(
-                  top: 8.0, left: 8.0,
-                  child: InkWell(
-                    onTap: () { if (Navigator.of(context).canPop()) Navigator.of(context).pop(); },
-                    customBorder: const CircleBorder(),
-                    child: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.9), shape: BoxShape.circle,
-                        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 3.0, offset: const Offset(0,1))]
-                      ),
-                      child: Icon(Icons.arrow_back_ios_new_rounded, color: theme.colorScheme.primary, size: 18),
-                    ),
-                  ),
-                ),
-                if (_isCurrentUserProfile)
-                  Positioned(
-                    top: 8.0, right: 8.0,
-                    child: InkWell(
-                      onTap: () {
-                         Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsPage()))
-                            .then((_) => _fetchUserProfile());
-                      },
-                      customBorder: const CircleBorder(),
-                      child: Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(color: Colors.black.withOpacity(0.45), shape: BoxShape.circle),
-                        child: const Icon(Icons.settings_outlined, color: Colors.white, size: 20),
-                      ),
-                    ),
-                  ),
-                Positioned(
-                  top: coverPhotoHeight - avatarRadius - avatarOverlap, left: 16.0,
-                  child: Container(
-                    padding: const EdgeInsets.all(avatarBorderWidth),
-                    decoration: BoxDecoration(
-                      color: theme.scaffoldBackgroundColor, shape: BoxShape.circle,
-                      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.12), blurRadius: 6.0, offset: const Offset(0, 3))],
-                    ),
-                    child: CircleAvatar(
-                      radius: avatarRadius, backgroundColor: Colors.grey[400], backgroundImage: avatarImgProvider,
-                      child: avatarImgProvider == null ? Icon(Icons.person_outline, size: avatarRadius * 0.8, color: Colors.white70) : null,
-                    ),
-                  ),
-                ),
-                Positioned(
-                  // <<--- ADJUSTED top position for username/edit icon row --- >>
-                  // Changed (avatarRadius * 0.5) to (avatarRadius * 0.4) to move it down slightly
-                  top: coverPhotoHeight - avatarOverlap - (avatarRadius * 0.4), 
-                  left: usernameLeftOffset, right: 16.0,
-                  height: (avatarRadius + avatarBorderWidth) * 2, 
+                  top: coverPhotoHeight - avatarOverlap - (avatarRadius * 0.45), // <<--- ADJUSTED: Fine-tuned vertical position
+                  left: usernameLeftOffset, right: 0, // Let it go to the edge, button will be constrained
+                  height: (avatarRadius + avatarBorderWidth) * 2,
                   child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween, crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-                      Expanded(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(_userProfile!.username ?? 'N/A',
-                              style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: theme.colorScheme.onSurface, fontSize: 18),
-                              maxLines: 1, overflow: TextOverflow.ellipsis,
-                            ),
-                            if (_userProfile!.fullName != null && _userProfile!.fullName!.isNotEmpty) ...[
-                              const SizedBox(height: 1.0),
-                              Text(_userProfile!.fullName!,
-                                style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey[600], fontSize: 13),
-                                maxLines: 1, overflow: TextOverflow.ellipsis,
-                              ),
-                            ],
-                          ],
-                        ),
+                      Expanded(child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(_userProfile!.username ?? 'N/A', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: theme.colorScheme.onSurface, fontSize: 18), maxLines: 1, overflow: TextOverflow.ellipsis),
+                        if (_userProfile!.fullName != null && _userProfile!.fullName!.isNotEmpty) ...[const SizedBox(height: 1.0), Text(_userProfile!.fullName!, style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey[600], fontSize: 13), maxLines: 1, overflow: TextOverflow.ellipsis)],
+                      ])),
+                      // <<--- UPDATED FOLLOW/EDIT BUTTON WRAPPER & STYLING --- >>
+                      Container( // Constrain the button's area
+                        padding: const EdgeInsets.only(right: 12.0, left: 8.0), // Add some padding around the button
+                        alignment: Alignment.centerRight,
+                        child: _isCurrentUserProfile
+                          ? IconButton(
+                              icon: Icon(Icons.edit_outlined, color: profileAccentColor, size: 22), // Smaller icon
+                              tooltip: "Edit Profile",
+                              constraints: const BoxConstraints(), // Remove extra padding from IconButton
+                              padding: EdgeInsets.zero,
+                              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const EditProfilePage())).then((_) => _fetchUserProfile())
+                            )
+                          : _isLoadingFollowStatus
+                              ? Container( // Container to give size to CircularProgressIndicator
+                                  width: 80, // Approximate width of the button
+                                  height: 30, // Approximate height of the button
+                                  alignment: Alignment.center,
+                                  child: const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2.0, valueColor: AlwaysStoppedAnimation<Color>(profileAccentColor))),
+                                )
+                              : _isFollowing
+                                ? OutlinedButton(
+                                    onPressed: _toggleFollow,
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: Colors.grey[700],
+                                      side: BorderSide(color: Colors.grey[400]!),
+                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4), // Tighter padding
+                                      textStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                                      minimumSize: Size.zero, // Allow button to be small
+                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                                    ),
+                                    child: const Text('Following'),
+                                  )
+                                : ElevatedButton(
+                                    onPressed: _toggleFollow,
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: theme.colorScheme.primary,
+                                      foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), // Tighter padding
+                                      textStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                                      minimumSize: Size.zero, // Allow button to be small
+                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                                    ),
+                                    child: const Text('Follow'),
+                                  ),
                       ),
-                      if (_isCurrentUserProfile)
-                        IconButton(
-                          icon: Icon(Icons.edit_outlined, color: profileAccentColor, size: 24),
-                          tooltip: "Edit Profile",
-                          onPressed: () {
-                            Navigator.push(context, MaterialPageRoute(builder: (_) => const EditProfilePage()))
-                                .then((_) => _fetchUserProfile());
-                          },
-                        ),
                     ],
                   ),
                 ),
               ],
             ),
           ),
-          Container(
-            padding: EdgeInsets.only(top: avatarOverlap + 2.0, left: 16.0, right: 16.0, bottom: 8.0),
-            alignment: Alignment.centerLeft,
-            child: Text(
-              (_userProfile!.bio != null && _userProfile!.bio!.isNotEmpty)
-                  ? _userProfile!.bio!
-                  : (_isCurrentUserProfile ? "No bio yet. Tap the edit icon above to add one!" : "No bio available."),
-              style: theme.textTheme.bodyMedium?.copyWith(
-                  height: 1.3, 
-                  color: (_userProfile!.bio != null && _userProfile!.bio!.isNotEmpty) ? Colors.grey[800] : Colors.grey[500],
-                  fontStyle: (_userProfile!.bio != null && _userProfile!.bio!.isNotEmpty) ? FontStyle.normal : FontStyle.italic,
-                  fontSize: 13.5), 
-            ),
-          ),
+          Container(padding: EdgeInsets.only(top: avatarOverlap + 2.0, left: 16.0, right: 16.0, bottom: 8.0), alignment: Alignment.centerLeft, child: Text((_userProfile!.bio != null && _userProfile!.bio!.isNotEmpty) ? _userProfile!.bio! : (_isCurrentUserProfile ? "No bio yet. Tap the edit icon above to add one!" : "No bio available."), style: theme.textTheme.bodyMedium?.copyWith(height: 1.3, color: (_userProfile!.bio != null && _userProfile!.bio!.isNotEmpty) ? Colors.grey[800] : Colors.grey[500], fontStyle: (_userProfile!.bio != null && _userProfile!.bio!.isNotEmpty) ? FontStyle.normal : FontStyle.italic, fontSize: 13.5))),
         ],
       ),
     );
   }
 
-  Widget _buildActivityTab(BuildContext context, ThemeData theme) {
+  Widget _buildActivityTab(BuildContext context, ThemeData theme) { /* ... Same as before ... */ 
     if (_isLoadingActivity) return const Center(child: CircularProgressIndicator());
     if (_activityError != null) return Center(child: Padding(padding: const EdgeInsets.all(16.0), child: Text(_activityError!, style: TextStyle(color: theme.colorScheme.error, fontSize: 16), textAlign: TextAlign.center)));
-
-    return Column(
-      children: [
-        if (_isCurrentUserProfile)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-            child: ElevatedButton.icon(
-              icon: const Icon(Icons.add_comment_outlined, size: 20),
-              label: const Text("Create Post"),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: profileAccentColor, foregroundColor: Colors.black87,
-                minimumSize: const Size(double.infinity, 40),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              ),
-              onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Create post functionality coming soon!")));
-              },
-            ),
-          ),
-        if (_userActivity.isEmpty)
-          Expanded(child: _buildContentPlaceholder("No activity yet.", Icons.history_toggle_off_outlined, theme, message: _isCurrentUserProfile ? "Your posts will appear here." : "This user hasn't posted anything yet.")),
-        if (_userActivity.isNotEmpty)
-          Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 0),
-              itemCount: _userActivity.length,
-              itemBuilder: (context, index) {
-                final post = _userActivity[index];
-                return ActivityPostCard(
-                  post: post,
-                  postAuthorProfileUrl: (post.userId == _userProfile?.id) ? _userProfile?.avatarUrl : post.userAvatarUrl,
-                  postAuthorName: (post.userId == _userProfile?.id) ? (_userProfile?.username ?? 'User') : (post.userName ?? 'User'),
-                  onLike: () => setState(() { post.isLikedByCurrentUser = !post.isLikedByCurrentUser; post.isLikedByCurrentUser ? post.likesCount++ : post.likesCount--; }),
-                  onComment: () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Comment action coming soon!"))),
-                  onShare: () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Share action coming soon!"))),
-                );
-              },
-            ),
-          ),
-      ],
-    );
+    return Column(children: [
+      if (_isCurrentUserProfile) Padding(padding: const EdgeInsets.fromLTRB(16, 12, 16, 8), child: ElevatedButton.icon(icon: const Icon(Icons.add_comment_outlined, size: 20), label: const Text("Create Post"), style: ElevatedButton.styleFrom(backgroundColor: profileAccentColor, foregroundColor: Colors.black87, minimumSize: const Size(double.infinity, 40), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))), onPressed: () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Create post functionality coming soon!"))))),
+      if (_userActivity.isEmpty) Expanded(child: _buildContentPlaceholder("No activity yet.", Icons.history_toggle_off_outlined, theme, message: _isCurrentUserProfile ? "Your posts will appear here." : "This user hasn't posted anything yet."))
+      else Expanded(child: ListView.builder(padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 0), itemCount: _userActivity.length, itemBuilder: (context, index) {
+        final post = _userActivity[index];
+        return ActivityPostCard(post: post, postAuthorProfileUrl: (post.userId == _userProfile?.id) ? _userProfile?.avatarUrl : post.userAvatarUrl, postAuthorName: (post.userId == _userProfile?.id) ? (_userProfile?.username ?? 'User') : (post.userName ?? 'User'), onLike: () => setState(() { post.isLikedByCurrentUser = !post.isLikedByCurrentUser; post.isLikedByCurrentUser ? post.likesCount++ : post.likesCount--; }), onComment: () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Comment action coming soon!"))), onShare: () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Share action coming soon!"))));
+      })),
+    ]);
   }
 
-  Widget _buildPinsTab(BuildContext context) {
-    final theme = Theme.of(context);
+  Widget _buildPinsTab(BuildContext context, ThemeData theme) { /* ... Same as before ... */ 
     if (_isLoadingPins) return const Center(child: CircularProgressIndicator());
     if (_pinsError != null) return Center(child: Padding(padding: const EdgeInsets.all(16.0), child: Text(_pinsError!, style: TextStyle(color: theme.colorScheme.error, fontSize: 16), textAlign: TextAlign.center)));
-    if (_userPins.isEmpty) {
-      final message = _isCurrentUserProfile ? "You haven't added any pins yet. Start your collection!" : "This user hasn't added any pins yet.";
-      return _buildContentPlaceholder("No pins yet!", Icons.push_pin_outlined, theme, message: message);
-    }
-    return GridView.builder(
-      padding: const EdgeInsets.all(12.0),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3, crossAxisSpacing: 10.0, mainAxisSpacing: 10.0, childAspectRatio: 0.85),
-      itemCount: _userPins.length,
-      itemBuilder: (context, index) {
-        final pin = _userPins[index];
-        return Card(
-          elevation: 2.0, clipBehavior: Clip.antiAlias, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12.0)),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            Expanded(flex: 3, child: (pin.imageUrl != null && pin.imageUrl!.isNotEmpty)
-              ? Image.network(pin.imageUrl!, fit: BoxFit.cover,
-                  loadingBuilder: (ctx, child, progress) => progress == null ? child : Center(child: CircularProgressIndicator(value: progress.expectedTotalBytes != null ? progress.cumulativeBytesLoaded / progress.expectedTotalBytes! : null, strokeWidth: 2.0)),
-                  errorBuilder: (ctx, err, st) => Container(color: Colors.grey[200], child: Icon(Icons.broken_image_outlined, size: 30, color: Colors.grey[400])))
-              : Container(color: Colors.grey[200], child: Icon(Icons.image_not_supported_outlined, size: 30, color: Colors.grey[400]))),
-            if (pin.title != null && pin.title!.isNotEmpty) Padding(padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 6.0), child: Text(pin.title!, textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis, style: theme.textTheme.bodySmall?.copyWith(fontSize: 11.5))),
-          ]),
-        );
-      },
-    );
+    return Column(children: [
+      Padding(padding: const EdgeInsets.symmetric(vertical: 12.0), child: ToggleButtons(isSelected: [_pinsViewMode == PinsViewMode.all, _pinsViewMode == PinsViewMode.sets], onPressed: (int index) => setState(() => _pinsViewMode = index == 0 ? PinsViewMode.all : PinsViewMode.sets), borderRadius: BorderRadius.circular(8.0), selectedColor: Colors.white, color: theme.colorScheme.primary, fillColor: theme.colorScheme.primary, constraints: BoxConstraints(minHeight: 36.0, minWidth: (MediaQuery.of(context).size.width - 48) / 2), children: const <Widget>[Padding(padding: EdgeInsets.symmetric(horizontal: 16.0), child: Text('All Pins')), Padding(padding: EdgeInsets.symmetric(horizontal: 16.0), child: Text('Sets'))])),
+      if (_pinsViewMode == PinsViewMode.all) ...[
+        if (_userPins.isEmpty) Expanded(child: _buildContentPlaceholder("No pins yet!", Icons.push_pin_outlined, theme, message: _isCurrentUserProfile ? "You haven't added any pins yet." : "This user has no pins."))
+        else Expanded(child: GridView.builder(padding: const EdgeInsets.all(12.0), gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3, crossAxisSpacing: 10.0, mainAxisSpacing: 10.0, childAspectRatio: 0.75), itemCount: _userPins.length, itemBuilder: (context, index) {
+          final pin = _userPins[index];
+          return Card(elevation: 2.0, clipBehavior: Clip.antiAlias, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10.0)), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Expanded(flex: 5, child: Stack(fit: StackFit.expand, children: [
+              (pin.imageUrl != null && pin.imageUrl!.isNotEmpty) ? Image.network(pin.imageUrl!, fit: BoxFit.cover, loadingBuilder: (ctx, child, progress) => progress == null ? child : Center(child: CircularProgressIndicator(value: progress.expectedTotalBytes != null ? progress.cumulativeBytesLoaded / progress.expectedTotalBytes! : null, strokeWidth: 2.0)), errorBuilder: (ctx, err, st) => Container(color: Colors.grey[200], child: Icon(Icons.broken_image_outlined, size: 30, color: Colors.grey[400]))) : Container(color: Colors.grey[200], child: Icon(Icons.image_not_supported_outlined, size: 30, color: Colors.grey[400])),
+              if (pin.status == PinStatus.forTrade) Positioned(top: 4.0, right: 4.0, child: Container(padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 2.0), decoration: BoxDecoration(color: Colors.orange.shade700.withOpacity(0.85), borderRadius: BorderRadius.circular(4.0), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 2, offset: Offset(0,1))]), child: Text(pin.statusDisplay, style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)))),
+            ])),
+            Padding(padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 5.0), child: Text(pin.title ?? 'Unnamed Pin', textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis, style: theme.textTheme.bodySmall?.copyWith(fontSize: 10.5, fontWeight: FontWeight.w500, height: 1.2))),
+          ]));
+        })),
+      ] else ...[Expanded(child: _buildContentPlaceholder("Sets - Coming Soon!", Icons.collections_bookmark_outlined, theme, message: "Organize your pins into sets here."))]
+    ]);
   }
 
-  Widget _buildContentPlaceholder(String text, IconData icon, ThemeData theme, {String? message}) {
+  Widget _buildContentPlaceholder(String text, IconData icon, ThemeData theme, {String? message}) { /* ... Same as before ... */ 
      return Center(child: Padding(padding: const EdgeInsets.all(24.0), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
         Icon(icon, size: 52, color: Colors.grey[400]), const SizedBox(height: 18),
         Text(text, style: theme.textTheme.titleMedium?.copyWith(color: Colors.grey[600]), textAlign: TextAlign.center),
@@ -488,7 +451,7 @@ class _UserProfilePageState extends State<UserProfilePage> with SingleTickerProv
 }
 
 // ActivityPostCard Widget (Keep this definition from previous version)
-class ActivityPostCard extends StatelessWidget {
+class ActivityPostCard extends StatelessWidget { /* ... Same as before ... */ 
   final ActivityPost post;
   final String? postAuthorProfileUrl;
   final String postAuthorName;
@@ -496,72 +459,31 @@ class ActivityPostCard extends StatelessWidget {
   final VoidCallback onComment;
   final VoidCallback onShare;
 
-  const ActivityPostCard({
-    super.key,
-    required this.post,
-    required this.postAuthorProfileUrl,
-    required this.postAuthorName,
-    required this.onLike,
-    required this.onComment,
-    required this.onShare,
-  });
+  const ActivityPostCard({super.key, required this.post, this.postAuthorProfileUrl, required this.postAuthorName, required this.onLike, required this.onComment, required this.onShare});
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final timeAgo = formatTimeAgo(post.createdAt);
-
-    return Card(
-      elevation: 2.0, margin: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 6.0),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12.0)),
-      child: Padding(padding: const EdgeInsets.all(12.0), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [ // Post Header
-          CircleAvatar(radius: 20, backgroundColor: Colors.grey[300],
-            backgroundImage: (postAuthorProfileUrl != null && postAuthorProfileUrl!.isNotEmpty) ? NetworkImage(postAuthorProfileUrl!) : null,
-            child: (postAuthorProfileUrl == null || postAuthorProfileUrl!.isEmpty) ? const Icon(Icons.person, size: 22, color: Colors.white) : null,
-          ),
-          const SizedBox(width: 10),
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(postAuthorName, style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
-            Text(timeAgo, style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey[600])),
-          ])),
-        ]),
-        const SizedBox(height: 12),
-        Text(post.content, style: theme.textTheme.bodyMedium?.copyWith(fontSize: 15, height: 1.4)), // Post Content
-        const SizedBox(height: 12),
-        if (post.likesCount > 0 || post.commentsCount > 0) Padding( // Likes/Comments Count
-          padding: const EdgeInsets.only(bottom: 8.0),
-          child: Row(children: [
-            if (post.likesCount > 0) ...[Icon(Icons.thumb_up_alt_rounded, size: 14, color: theme.colorScheme.primary), const SizedBox(width: 4), Text("${post.likesCount}", style: theme.textTheme.bodySmall), const SizedBox(width: 12)],
-            if (post.commentsCount > 0) Text("${post.commentsCount} Comments", style: theme.textTheme.bodySmall),
-          ]),
-        ),
-        Divider(height: 1, color: Colors.grey[300]),
-        Padding(padding: const EdgeInsets.only(top: 4.0), child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [ // Action Buttons
-          _actionButton(context, icon: post.isLikedByCurrentUser ? Icons.thumb_up_alt_rounded : Icons.thumb_up_alt_outlined, label: "Like", color: post.isLikedByCurrentUser ? theme.colorScheme.primary : Colors.grey[700], onPressed: onLike),
-          _actionButton(context, icon: Icons.chat_bubble_outline_rounded, label: "Comment", color: Colors.grey[700], onPressed: onComment),
-          _actionButton(context, icon: Icons.share_outlined, label: "Share", color: Colors.grey[700], onPressed: onShare),
-        ])),
-      ])),
-    );
+    return Card(elevation: 2.0, margin: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 6.0), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12.0)), child: Padding(padding: const EdgeInsets.all(12.0), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [CircleAvatar(radius: 20, backgroundColor: Colors.grey[300], backgroundImage: (postAuthorProfileUrl != null && postAuthorProfileUrl!.isNotEmpty) ? NetworkImage(postAuthorProfileUrl!) : null, child: (postAuthorProfileUrl == null || postAuthorProfileUrl!.isEmpty) ? const Icon(Icons.person, size: 22, color: Colors.white) : null), const SizedBox(width: 10), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(postAuthorName, style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)), Text(timeAgo, style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey[600]))]))]),
+      const SizedBox(height: 12), Text(post.content, style: theme.textTheme.bodyMedium?.copyWith(fontSize: 15, height: 1.4)), const SizedBox(height: 12),
+      if (post.likesCount > 0 || post.commentsCount > 0) Padding(padding: const EdgeInsets.only(bottom: 8.0), child: Row(children: [if (post.likesCount > 0) ...[Icon(Icons.thumb_up_alt_rounded, size: 14, color: theme.colorScheme.primary), const SizedBox(width: 4), Text("${post.likesCount}", style: theme.textTheme.bodySmall), const SizedBox(width: 12)], if (post.commentsCount > 0) Text("${post.commentsCount} Comments", style: theme.textTheme.bodySmall)])),
+      Divider(height: 1, color: Colors.grey[300]), Padding(padding: const EdgeInsets.only(top: 4.0), child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [_actionButton(context, icon: post.isLikedByCurrentUser ? Icons.thumb_up_alt_rounded : Icons.thumb_up_alt_outlined, label: "Like", color: post.isLikedByCurrentUser ? theme.colorScheme.primary : Colors.grey[700], onPressed: onLike), _actionButton(context, icon: Icons.chat_bubble_outline_rounded, label: "Comment", color: Colors.grey[700], onPressed: onComment), _actionButton(context, icon: Icons.share_outlined, label: "Share", color: Colors.grey[700], onPressed: onShare)]))
+    ])));
   }
 
-  Widget _actionButton(BuildContext context, {required IconData icon, required String label, Color? color, required VoidCallback onPressed}) {
-    return TextButton.icon(
-      icon: Icon(icon, size: 20, color: color ?? Theme.of(context).iconTheme.color),
-      label: Text(label, style: TextStyle(fontSize: 13, color: color ?? Theme.of(context).textTheme.bodyMedium?.color)),
-      onPressed: onPressed,
-      style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8), tapTargetSize: MaterialTapTargetSize.shrinkWrap),
-    );
+  Widget _actionButton(BuildContext context, {required IconData icon, required String label, Color? color, required VoidCallback onPressed}) { /* ... Same as before ... */ 
+    return TextButton.icon(icon: Icon(icon, size: 20, color: color ?? Theme.of(context).iconTheme.color), label: Text(label, style: TextStyle(fontSize: 13, color: color ?? Theme.of(context).textTheme.bodyMedium?.color)), onPressed: onPressed, style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8), tapTargetSize: MaterialTapTargetSize.shrinkWrap));
   }
 
-  String formatTimeAgo(DateTime dateTime) {
+  String formatTimeAgo(DateTime dateTime) { /* ... Same as before ... */ 
     final now = DateTime.now(); final difference = now.difference(dateTime);
     if (difference.inSeconds < 5) return 'just now';
     if (difference.inMinutes < 1) return '${difference.inSeconds}s ago';
     if (difference.inHours < 1) return '${difference.inMinutes}m ago';
     if (difference.inHours < 24) return '${difference.inHours}h ago';
     if (difference.inDays < 7) return '${difference.inDays}d ago';
-    return DateFormat('MMM d, yyyy').format(dateTime); // Corrected DateFormat pattern
+    return DateFormat('MMM d, yyyy').format(dateTime); 
   }
 }
