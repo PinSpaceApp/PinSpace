@@ -8,22 +8,20 @@ import 'scanner_page.dart';
 import 'community_page.dart';
 import 'marketplace_page.dart';
 import 'settings_page.dart';
-import 'user_profile_page.dart'; // Ensure UserProfilePage is imported
-import 'search_results_page.dart'; // This import requires search_results_page.dart to exist in lib/screens/
+import 'user_profile_page.dart'; 
+import 'search_results_page.dart'; 
+import 'pin_catalog_page.dart'; // <<--- UNCOMMENTED and assuming this file exists
 
 final supabase = Supabase.instance.client;
 
-const Color appPrimaryColor = Color(0xFF30479b); // Your chosen primary color
+const Color appPrimaryColor = Color(0xFF30479b); 
 
 // Enum for Popup Menu Actions
-enum ProfileMenuAction { myProfile, myMarket, settings, logout }
+enum ProfileMenuAction { myProfile, myMarket, myTrophies, settings, logout }
 
 
 class MainAppShell extends StatefulWidget {
   const MainAppShell({super.key});
-
-  // Define a constant for the user profile route name.
-  // This helps in identifying the route reliably.
   static const String userProfileRouteName = '/user_profile_page';
 
   @override
@@ -39,7 +37,6 @@ class _MainAppShellState extends State<MainAppShell> {
   bool _isLoadingAvatar = true;
   late final StreamSubscription<AuthState> _authStateSubscription;
 
-  // Define your pages that are managed by the PageView and BottomAppBar
   static final List<Widget> _widgetOptions = <Widget>[
     DashboardPage(),
     MyPinsPage(),
@@ -59,10 +56,9 @@ class _MainAppShellState extends State<MainAppShell> {
       }
     });
 
-    // Listen to changes in search controller to show/hide clear button
     _searchController.addListener(() {
       if (mounted) {
-        setState(() {}); // Rebuild to update suffix icon
+        setState(() {}); 
       }
     });
   }
@@ -89,7 +85,7 @@ class _MainAppShellState extends State<MainAppShell> {
           });
         } else if (mounted) {
             setState(() {
-            _userAvatarUrl = null;
+            _userAvatarUrl = null; 
             _isLoadingAvatar = false;
           });
         }
@@ -125,7 +121,6 @@ class _MainAppShellState extends State<MainAppShell> {
       context,
       MaterialPageRoute(builder: (context) => const ScannerPage()),
     ).then((_) {
-      // Optional: refresh data if needed after scanner page
       if (mounted) {
         setState(() {});
       }
@@ -138,7 +133,7 @@ class _MainAppShellState extends State<MainAppShell> {
         Navigator.push(
             context,
             MaterialPageRoute(
-                builder: (context) => const UserProfilePage(), 
+                builder: (context) => const UserProfilePage(initialTabIndex: 0), 
                 settings: const RouteSettings(name: MainAppShell.userProfileRouteName),
             )
         ).then((_) {
@@ -151,6 +146,19 @@ class _MainAppShellState extends State<MainAppShell> {
         if (_selectedIndex != 3) { 
           _onItemTapped(3);
         }
+        break;
+      case ProfileMenuAction.myTrophies:
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => const UserProfilePage(initialTabIndex: 4), 
+            settings: const RouteSettings(name: MainAppShell.userProfileRouteName),
+          )
+        ).then((_){
+           if (mounted) {
+            setState(() {});
+          }
+        });
         break;
       case ProfileMenuAction.settings:
         Navigator.push(context, MaterialPageRoute(builder: (context) => const SettingsPage()))
@@ -182,15 +190,15 @@ class _MainAppShellState extends State<MainAppShell> {
     }
   }
 
-
   void _onTopIconPressed(String iconName) {
     print('$iconName icon pressed!');
-    if (iconName == 'Notifications') {
+    if (iconName == 'Catalog') {
+        // <<--- MODIFIED: Navigate to PinCatalogPage --- >>
+        Navigator.push(context, MaterialPageRoute(builder: (context) => const PinCatalogPage()));
+    } else if (iconName == 'Notifications') {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Notifications page coming soon!")));
     } else if (iconName == 'Messages') {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Messages page coming soon!")));
-    } else if (iconName == 'Achievements') {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Achievements page coming soon!")));
     }
   }
 
@@ -238,25 +246,33 @@ class _MainAppShellState extends State<MainAppShell> {
     final ModalRoute<dynamic>? currentRoute = ModalRoute.of(context);
     final bool isUserProfilePageActive = currentRoute?.settings.name == MainAppShell.userProfileRouteName;
     
-    // More robust check for SearchResultsPage being active
     bool isSearchResultsPageActive = false;
     if (currentRoute is MaterialPageRoute) {
-        // Check the type of the widget built by the route's builder
-        // This requires SearchResultsPage to be correctly imported and recognized as a type.
-        // If SearchResultsPage is not found due to import errors, this check might not work as expected.
         try {
            final widget = currentRoute.builder(context);
            if (widget is SearchResultsPage) {
              isSearchResultsPageActive = true;
            }
         } catch (e) {
-          // Catch potential errors if SearchResultsPage type check fails due to import issues
           print("Error checking route type for SearchResultsPage: $e");
         }
     }
+    
+    // <<--- NEW: Check if PinCatalogPage is active --- >>
+    bool isPinCatalogPageActive = false;
+    if (currentRoute is MaterialPageRoute) {
+      try {
+        final widget = currentRoute.builder(context);
+        if (widget is PinCatalogPage) { // Assuming PinCatalogPage is the class name
+          isPinCatalogPageActive = true;
+        }
+      } catch (e) {
+        print("Error checking route type for PinCatalogPage: $e");
+      }
+    }
 
-
-    final bool shouldShowShellAppBarAndSearch = !isUserProfilePageActive && !isSearchResultsPageActive;
+    // <<--- MODIFIED: Shell AppBar hidden if UserProfilePage OR PinCatalogPage is active --- >>
+    final bool shouldShowShellAppBarAndSearch = !isUserProfilePageActive && !isSearchResultsPageActive && !isPinCatalogPageActive;
     
     final double pageViewTopWhenShellAppBarVisible = safeAreaTopPadding + totalAppBarAreaHeight + (searchBarHeight / 2) + 8.0;
     final double pageViewTop = shouldShowShellAppBarAndSearch
@@ -280,45 +296,28 @@ class _MainAppShellState extends State<MainAppShell> {
 
           if (shouldShowShellAppBarAndSearch)
             Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
+              top: 0, left: 0, right: 0,
               height: safeAreaTopPadding + totalAppBarAreaHeight, 
-              child: Container(
-                color: customAppBarColor, 
-              ),
+              child: Container(color: customAppBarColor),
             ),
 
           if (shouldShowShellAppBarAndSearch)
             Positioned(
-              top: safeAreaTopPadding, 
-              left: 0,
-              right: 0,
+              top: safeAreaTopPadding, left: 0, right: 0,
               height: totalAppBarAreaHeight, 
               child: AppBar(
                 backgroundColor: Colors.transparent, 
                 foregroundColor: Colors.white, 
                 elevation: 0, 
-                title: Text(
-                  _getAppBarTitle(_selectedIndex),
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 22),
-                ),
+                title: Text(_getAppBarTitle(_selectedIndex), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 22)),
                 actions: [
                   IconButton(
-                    icon: const Icon(Icons.emoji_events_outlined),
-                    tooltip: 'Achievements',
-                    onPressed: () => _onTopIconPressed('Achievements'),
+                    icon: const Icon(Icons.auto_stories_outlined), 
+                    tooltip: 'Pin Catalog',
+                    onPressed: () => _onTopIconPressed('Catalog'),
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.notifications_none_outlined),
-                    tooltip: 'Notifications',
-                    onPressed: () => _onTopIconPressed('Notifications'),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.message_outlined),
-                    tooltip: 'Messages',
-                    onPressed: () => _onTopIconPressed('Messages'),
-                  ),
+                  IconButton(icon: const Icon(Icons.notifications_none_outlined), tooltip: 'Notifications', onPressed: () => _onTopIconPressed('Notifications')),
+                  IconButton(icon: const Icon(Icons.message_outlined), tooltip: 'Messages', onPressed: () => _onTopIconPressed('Messages')),
                   PopupMenuButton<ProfileMenuAction>(
                     onSelected: _handleProfileMenuSelection,
                     offset: const Offset(0, kToolbarHeight - 10), 
@@ -327,12 +326,8 @@ class _MainAppShellState extends State<MainAppShell> {
                         : CircleAvatar(
                             radius: 16, 
                             backgroundColor: Colors.white.withOpacity(0.3), 
-                            backgroundImage: _userAvatarUrl != null && _userAvatarUrl!.isNotEmpty
-                                ? NetworkImage(_userAvatarUrl!)
-                                : null,
-                            child: (_userAvatarUrl == null || _userAvatarUrl!.isEmpty)
-                                ? const Icon(Icons.person_outline, size: 22, color: Colors.white) 
-                                : null,
+                            backgroundImage: _userAvatarUrl != null && _userAvatarUrl!.isNotEmpty ? NetworkImage(_userAvatarUrl!) : null,
+                            child: (_userAvatarUrl == null || _userAvatarUrl!.isEmpty) ? const Icon(Icons.person_outline, size: 22, color: Colors.white) : null,
                           ),
                     itemBuilder: (BuildContext context) => <PopupMenuEntry<ProfileMenuAction>>[
                       const PopupMenuItem<ProfileMenuAction>(
@@ -342,6 +337,10 @@ class _MainAppShellState extends State<MainAppShell> {
                       const PopupMenuItem<ProfileMenuAction>(
                         value: ProfileMenuAction.myMarket,
                         child: ListTile(leading: Icon(Icons.store_mall_directory_outlined), title: Text('My Market')),
+                      ),
+                       const PopupMenuItem<ProfileMenuAction>( 
+                        value: ProfileMenuAction.myTrophies,
+                        child: ListTile(leading: Icon(Icons.emoji_events_outlined), title: Text('My Trophies')),
                       ),
                       const PopupMenuItem<ProfileMenuAction>(
                         value: ProfileMenuAction.settings,
@@ -363,20 +362,12 @@ class _MainAppShellState extends State<MainAppShell> {
           if (shouldShowShellAppBarAndSearch)
             Positioned(
               top: safeAreaTopPadding + totalAppBarAreaHeight - (searchBarHeight / 2), 
-              left: 16.0,
-              right: 16.0,
-              height: searchBarHeight,
+              left: 16.0, right: 16.0, height: searchBarHeight,
               child: Container(
                 decoration: BoxDecoration(
                   color: theme.cardColor, 
                   borderRadius: BorderRadius.circular(searchBarHeight / 2), 
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.15),
-                      blurRadius: 6,
-                      offset: const Offset(0, 3),
-                    ),
-                  ],
+                  boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 6, offset: const Offset(0, 3))],
                 ),
                 child: TextField(
                   controller: _searchController,
@@ -385,18 +376,8 @@ class _MainAppShellState extends State<MainAppShell> {
                     hintStyle: TextStyle(color: theme.hintColor.withOpacity(0.6), fontSize: 14),
                     prefixIcon: Icon(Icons.search, color: theme.iconTheme.color?.withOpacity(0.8), size: 20),
                     suffixIcon: _searchController.text.isNotEmpty
-                        ? IconButton(
-                            icon: Icon(Icons.clear, color: theme.iconTheme.color?.withOpacity(0.8), size: 20),
-                            onPressed: () {
-                              _searchController.clear();
-                            },
-                            tooltip: 'Clear search',
-                          )
-                        : IconButton( 
-                            icon: Icon(Icons.filter_list, color: theme.iconTheme.color?.withOpacity(0.8), size: 20),
-                            onPressed: () { print("Filter tapped"); }, 
-                            tooltip: 'Filter',
-                          ),
+                        ? IconButton(icon: Icon(Icons.clear, color: theme.iconTheme.color?.withOpacity(0.8), size: 20), onPressed: () => _searchController.clear(), tooltip: 'Clear search')
+                        : IconButton(icon: Icon(Icons.filter_list, color: theme.iconTheme.color?.withOpacity(0.8), size: 20), onPressed: () { print("Filter tapped"); }, tooltip: 'Filter'),
                     border: InputBorder.none, 
                     contentPadding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 5.0), 
                   ),
@@ -409,32 +390,20 @@ class _MainAppShellState extends State<MainAppShell> {
         ],
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: _onScannerButtonPressed,
-        tooltip: 'Scan Pin',
-        backgroundColor: customAppBarColor, 
-        foregroundColor: Colors.white,
-        elevation: 4.0,
-        shape: const CircleBorder(),
-        child: const Icon(
-          Icons.camera, 
-          size: 30.0,
-        ),
+        onPressed: _onScannerButtonPressed, tooltip: 'Scan Pin', backgroundColor: customAppBarColor, 
+        foregroundColor: Colors.white, elevation: 4.0, shape: const CircleBorder(),
+        child: const Icon(Icons.camera, size: 30.0),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
       bottomNavigationBar: BottomAppBar(
-        shape: const CircularNotchedRectangle(),
-        notchMargin: 8.0,
-        elevation: 8.0,
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: <Widget>[
-            _buildBottomNavItem(icon: Icons.dashboard_outlined, activeIcon: Icons.dashboard, label: 'Dashboard', index: 0),
-            _buildBottomNavItem(icon: Icons.style_outlined, activeIcon: Icons.style, label: 'My Pins', index: 1),
-            const SizedBox(width: 48), 
-            _buildBottomNavItem(icon: Icons.people_outline, activeIcon: Icons.people, label: 'Community', index: 2),
-            _buildBottomNavItem(icon: Icons.storefront_outlined, activeIcon: Icons.storefront, label: 'Pin Market', index: 3),
-          ],
-        ),
+        shape: const CircularNotchedRectangle(), notchMargin: 8.0, elevation: 8.0,
+        child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: <Widget>[
+          _buildBottomNavItem(icon: Icons.dashboard_outlined, activeIcon: Icons.dashboard, label: 'Dashboard', index: 0),
+          _buildBottomNavItem(icon: Icons.style_outlined, activeIcon: Icons.style, label: 'My Pins', index: 1),
+          const SizedBox(width: 48), 
+          _buildBottomNavItem(icon: Icons.people_outline, activeIcon: Icons.people, label: 'Community', index: 2),
+          _buildBottomNavItem(icon: Icons.storefront_outlined, activeIcon: Icons.storefront, label: 'Pin Market', index: 3),
+        ]),
       ),
     );
   }
@@ -443,32 +412,7 @@ class _MainAppShellState extends State<MainAppShell> {
     final bool isSelected = (index == _selectedIndex);
     final color = isSelected ? appPrimaryColor : Theme.of(context).colorScheme.onSurface.withOpacity(0.7);
     final selectedIcon = activeIcon ?? icon;
-
-    return Expanded(
-      child: InkWell(
-        onTap: () => _onItemTapped(index),
-        customBorder: const CircleBorder(),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4.0), 
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              Icon(isSelected ? selectedIcon : icon, color: color, size: 24),
-              const SizedBox(height: 2), 
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 10,
-                  color: color,
-                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                ),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+    return Expanded(child: InkWell(onTap: () => _onItemTapped(index), customBorder: const CircleBorder(), child: Padding(padding: const EdgeInsets.symmetric(vertical: 4.0), child: Column(mainAxisSize: MainAxisSize.min, children: <Widget>[ Icon(isSelected ? selectedIcon : icon, color: color, size: 24), const SizedBox(height: 2), Text(label, style: TextStyle(fontSize: 10, color: color, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal), overflow: TextOverflow.ellipsis)]))));
   }
 
   String _getAppBarTitle(int index) {
