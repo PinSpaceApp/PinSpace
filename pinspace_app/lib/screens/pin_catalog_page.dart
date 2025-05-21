@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'user_profile_page.dart'; 
 import 'main_app_shell.dart'; 
 // import 'my_wishlist_page.dart'; // Placeholder for your Wishlist page
+// import 'marketplace_page.dart'; // Placeholder for Marketplace navigation
 
 final supabase = Supabase.instance.client;
 
@@ -100,7 +101,7 @@ class _PinCatalogPageState extends State<PinCatalogPage> {
   String? _currentUserId;
 
   Set<String> _wishlistedPinIds = {}; 
-  Set<String> _ownedCatalogPinIds = {}; // <<--- NEW: To track owned catalog pins
+  Set<String> _ownedCatalogPinIds = {}; 
   final TextEditingController _searchController = TextEditingController();
   bool _isSearching = false;
 
@@ -147,7 +148,7 @@ class _PinCatalogPageState extends State<PinCatalogPage> {
     try {
       if (_currentUserId != null) {
         await _fetchUserWishlist(); 
-        await _fetchOwnedCatalogPinIds(); // <<--- NEW: Fetch owned pins
+        await _fetchOwnedCatalogPinIds(); 
       }
       if (_viewMode == CatalogViewMode.pins) {
         await _fetchCatalogPins();
@@ -224,25 +225,12 @@ class _PinCatalogPageState extends State<PinCatalogPage> {
     }
   }
 
-  // <<--- NEW: Method to fetch IDs of catalog pins already in user's collection --- >>
   Future<void> _fetchOwnedCatalogPinIds() async {
     if (_currentUserId == null || !mounted) return;
     try {
-      // This query assumes your 'pins' table (user's collection) has a
-      // column like 'source_pin_id' that matches 'all_pins_catalog.source_pin_id'
-      // OR a 'catalog_ref_id' that matches 'all_pins_catalog.id'.
-      // Adjust the column name ('source_pin_id' or 'catalog_ref_id') as per your 'pins' table structure.
-      // For this example, I'll assume you might store 'all_pins_catalog.id' in your 'pins' table
-      // as 'catalog_pin_ref_id' when a user "owns" a catalog pin.
-      
-      // If you don't have a direct link from your 'pins' table back to 'all_pins_catalog.id',
-      // this becomes harder. You might have to match by name/series, which is less reliable.
-      // For now, let's assume a 'catalog_pin_ref_id' column exists in your 'pins' table.
-      // If not, this will return empty and all pins will appear as "not owned".
-
       final response = await supabase
-          .from('pins') // User's personal collection table
-          .select('catalog_pin_ref_id') // Column in 'pins' that links to 'all_pins_catalog.id'
+          .from('pins') 
+          .select('catalog_pin_ref_id') 
           .eq('user_id', _currentUserId!);
       
       if (!mounted) return;
@@ -257,13 +245,11 @@ class _PinCatalogPageState extends State<PinCatalogPage> {
       print("Owned catalog pin IDs: $_ownedCatalogPinIds");
     } catch (e) {
       print("Error fetching owned catalog pin IDs: $e");
-      // If this fails, all pins will appear as not owned.
     }
   }
 
 
   Future<void> _toggleWishlist(CatalogPin pin) async {
-    // ... (same as before)
     if (_currentUserId == null || !mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("You need to be logged in to manage your wishlist.")),
@@ -303,7 +289,6 @@ class _PinCatalogPageState extends State<PinCatalogPage> {
       return;
     }
     
-    // Check if already owned to prevent duplicates, or handle quantity update
     if (_ownedCatalogPinIds.contains(catalogPin.id)) {
          ScaffoldMessenger.of(context).showSnackBar(
            SnackBar(content: Text("'${catalogPin.name}' is already in your collection.")),
@@ -313,8 +298,6 @@ class _PinCatalogPageState extends State<PinCatalogPage> {
 
     print("Adding '${catalogPin.name}' to current user's collection (ID: $_currentUserId)");
     try {
-      // IMPORTANT: Add a 'catalog_pin_ref_id' column (or similar) to your 'pins' table
-      // that stores 'catalogPin.id' from 'all_pins_catalog'.
       final  insertData = {
         'user_id': _currentUserId, 
         'name': catalogPin.name, 
@@ -327,19 +310,21 @@ class _PinCatalogPageState extends State<PinCatalogPage> {
         'release_date': catalogPin.releaseDate,
         'edition_size': catalogPin.editionSize,
         'tags': catalogPin.tags,
-        'custom_set_name': catalogPin.customSetName,
-        // 'catalog_pin_ref_id': catalogPin.id, // <<--- ADD THIS TO YOUR 'pins' TABLE SCHEMA
-        // 'set_id': catalogPin.catalogSetId?.toInt(), // If linking to user's personal sets based on master set
+        // 'custom_set_name': catalogPin.customSetName, // This is for the catalog entry, not directly for user's pin unless you have a column
+        'catalog_pin_ref_id': catalogPin.id, 
+        // <<--- NEW: Add catalog_series_name to user's pin entry --- >>
+        'catalog_series_name': catalogPin.seriesNameFromSource, 
+        // If your 'pins' table still uses 'set_id' for a user's personal sets table,
+        // you might want to prompt the user to select one of their sets or create a new one here.
+        // For now, we are just copying the series name as text.
       };
-      // Remove null values to avoid DB errors if columns don't allow nulls
       insertData.removeWhere((key, value) => value == null);
-
 
       await supabase.from('pins').insert(insertData);
 
       if (mounted) {
         setState(() {
-          _ownedCatalogPinIds.add(catalogPin.id); // Update local state
+          _ownedCatalogPinIds.add(catalogPin.id); 
         });
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("'${catalogPin.name}' added to your collection!")));
       }
@@ -355,6 +340,10 @@ class _PinCatalogPageState extends State<PinCatalogPage> {
   
   void _navigateToWishlist() {
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Wishlist page coming soon!")));
+  }
+  
+  void _navigateToMarketplaceForPin(CatalogPin pin) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Marketplace action for '${pin.name}' coming soon!")));
   }
 
 
@@ -440,19 +429,19 @@ class _PinCatalogPageState extends State<PinCatalogPage> {
         return Center(child: Text(_searchController.text.isEmpty ? "No pins found in the catalog." : "No pins match your search."));
       }
       return GridView.builder(
-        padding: const EdgeInsets.all(10.0), 
+        padding: const EdgeInsets.all(8.0), 
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 3, // <<--- MODIFIED: 3 columns --- >>
-          crossAxisSpacing: 8.0, 
-          mainAxisSpacing: 8.0,  
-          childAspectRatio: 0.62, // <<--- MODIFIED: Adjusted for 3 columns & more text --- >>
+          crossAxisCount: 3, 
+          crossAxisSpacing: 6.0, 
+          mainAxisSpacing: 6.0,  
+          childAspectRatio: 0.62, 
         ),
         itemCount: pinsToDisplay.length,
         itemBuilder: (context, index) {
           final pin = pinsToDisplay[index];
           final bool isWishlisted = _wishlistedPinIds.contains(pin.id);
-          final bool isOwned = _ownedCatalogPinIds.contains(pin.id); // <<--- NEW
-          return _buildPinCard(pin, isWishlisted, isOwned); // <<--- NEW
+          final bool isOwned = _ownedCatalogPinIds.contains(pin.id); 
+          return _buildPinCard(pin, isWishlisted, isOwned); 
         },
       );
     } else { 
@@ -480,7 +469,7 @@ class _PinCatalogPageState extends State<PinCatalogPage> {
     }
   }
 
-  Widget _buildPinCard(CatalogPin pin, bool isWishlisted, bool isOwned) { // <<--- MODIFIED: Added isOwned
+  Widget _buildPinCard(CatalogPin pin, bool isWishlisted, bool isOwned) { 
     String year = ""; 
     if (pin.releaseDate != null && pin.releaseDate!.isNotEmpty) {
       try {
@@ -499,99 +488,96 @@ class _PinCatalogPageState extends State<PinCatalogPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Expanded(
-            flex: 6, // Give image a bit more space
-            child: Stack(
+          Container(
+            color: Colors.grey[200], 
+            padding: const EdgeInsets.symmetric(horizontal: 2.0, vertical: 2.0),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end, 
               children: [
-                Positioned.fill(
-                  child: (pin.imageUrl.isNotEmpty && pin.imageUrl != 'https://placehold.co/300x300/E6E6FA/333333?text=No+Image')
-                      ? Image.network(
-                          pin.imageUrl,
-                          fit: BoxFit.contain, 
-                          loadingBuilder: (context, child, loadingProgress) {
-                            if (loadingProgress == null) return child;
-                            return const Center(child: CircularProgressIndicator(strokeWidth: 1.5));
-                          },
-                          errorBuilder: (context, error, stackTrace) => const Icon(Icons.broken_image, size: 30, color: Colors.grey),
-                        )
-                      : Container(color: Colors.grey[200], child: const Icon(Icons.image_not_supported, size: 30, color: Colors.grey)),
-                ),
-                // <<--- MODIFIED: Wishlist and Own Icons in a Row --- >>
-                Positioned(
-                  top: 2,
-                  right: 2,
-                  child: Container(
-                     decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.05), // Very subtle background for icons
-                      borderRadius: BorderRadius.circular(10.0),
-                    ),
-                    padding: const EdgeInsets.symmetric(horizontal: 2.0),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          icon: Icon(
-                            isWishlisted ? Icons.favorite : Icons.favorite_border,
-                            color: isWishlisted ? Colors.red.shade400 : Colors.black54,
-                          ),
-                          iconSize: 18, // Adjusted size
-                          padding: const EdgeInsets.all(3),
-                          constraints: const BoxConstraints(),
-                          tooltip: isWishlisted ? "Remove from Wishlist" : "Add to Wishlist",
-                          onPressed: () => _toggleWishlist(pin),
-                        ),
-                        IconButton( // <<--- NEW "Own" Icon Button --- >>
-                          icon: Icon(
-                            isOwned ? Icons.library_add_check : Icons.library_add_outlined, // Option 3 (library_add)
-                            color: isOwned ? theme.colorScheme.primary : Colors.black54,
-                          ),
-                          iconSize: 18, // Adjusted size
-                          padding: const EdgeInsets.all(3),
-                          constraints: const BoxConstraints(),
-                          tooltip: isOwned ? "In Your Collection" : "Add to My Collection",
-                          onPressed: isOwned ? null : () => _addPinToMyCollection(pin), // Disable if owned, or implement remove
-                        ),
-                      ],
-                    ),
+                IconButton(
+                  icon: Icon(
+                    isWishlisted ? Icons.favorite : Icons.favorite_border,
+                    color: isWishlisted ? Colors.red.shade400 : Colors.grey[700],
                   ),
+                  iconSize: 22, 
+                  padding: const EdgeInsets.all(4),
+                  constraints: const BoxConstraints(),
+                  tooltip: isWishlisted ? "Remove from Wishlist" : "Add to Wishlist",
+                  onPressed: () => _toggleWishlist(pin),
+                ),
+                const SizedBox(width: 4),
+                IconButton( 
+                  icon: Icon(
+                    isOwned ? Icons.library_add_check : Icons.library_add_outlined, 
+                    color: isOwned ? theme.colorScheme.primary : Colors.grey[700],
+                  ),
+                  iconSize: 22, 
+                  padding: const EdgeInsets.all(4),
+                  constraints: const BoxConstraints(),
+                  tooltip: isOwned ? "In Your Collection" : "Add to My Collection",
+                  onPressed: isOwned ? null : () => _addPinToMyCollection(pin), 
+                ),
+                 const SizedBox(width: 4),
+                IconButton( 
+                  icon: Icon(
+                    Icons.storefront_outlined, 
+                    color: Colors.grey[700],
+                  ),
+                  iconSize: 22, 
+                  padding: const EdgeInsets.all(4),
+                  constraints: const BoxConstraints(),
+                  tooltip: "Find on Marketplace",
+                  onPressed: () => _navigateToMarketplaceForPin(pin),
                 ),
               ],
             ),
           ),
+          Expanded(
+            flex: 5, 
+            child: (pin.imageUrl.isNotEmpty && pin.imageUrl != 'https://placehold.co/300x300/E6E6FA/333333?text=No+Image')
+                ? Image.network(
+                    pin.imageUrl,
+                    fit: BoxFit.contain, 
+                    loadingBuilder: (context, child, loadingProgress) {
+                      if (loadingProgress == null) return child;
+                      return const Center(child: CircularProgressIndicator(strokeWidth: 1.5));
+                    },
+                    errorBuilder: (context, error, stackTrace) => const Icon(Icons.broken_image, size: 30, color: Colors.grey),
+                  )
+                : Container(color: Colors.grey[100], child: const Icon(Icons.image_not_supported, size: 30, color: Colors.grey)),
+          ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(6.0, 4.0, 6.0, 2.0),
+            padding: const EdgeInsets.fromLTRB(6.0, 6.0, 6.0, 2.0), 
             child: Text(
               pin.name,
               textAlign: TextAlign.center,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 11.0, fontWeight: FontWeight.bold, height: 1.1), 
+              style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, height: 1.2), 
             ),
           ),
-          // Display Series Name (from PinAndPop)
           if (pin.seriesNameFromSource != null && pin.seriesNameFromSource!.isNotEmpty)
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 0.5),
+              padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 1.0),
               child: Text(
                 "Series: ${pin.seriesNameFromSource!}",
                 textAlign: TextAlign.center,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 9.0, color: Colors.grey[700], height: 1.1),
+                style: TextStyle(fontSize: 9.5, color: Colors.grey[700], height: 1.1),
               ),
             ),
-          // Display Custom Set Name if different from Series Name
           if (pin.customSetName != null && 
               pin.customSetName!.isNotEmpty && 
               pin.customSetName != pin.seriesNameFromSource)
              Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 0.5),
+              padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 1.0),
               child: Text(
                 "Set: ${pin.customSetName!}",
                 textAlign: TextAlign.center,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 9.0, color: Colors.grey[600], fontStyle: FontStyle.italic, height: 1.1),
+                style: TextStyle(fontSize: 9.5, color: Colors.grey[600], fontStyle: FontStyle.italic, height: 1.1),
               ),
             ),
           if (year.isNotEmpty)
@@ -600,11 +586,10 @@ class _PinCatalogPageState extends State<PinCatalogPage> {
               child: Text(
                 "Year: $year",
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 9.0, color: Colors.grey[600], height: 1.1),
+                style: TextStyle(fontSize: 9.5, color: Colors.grey[600], height: 1.1),
               ),
             ),
-          // Removed the "Own" button from here as it's now an icon
-          const SizedBox(height: 4), // Add a little bottom padding
+          const SizedBox(height: 4), 
         ],
       ),
     );
@@ -619,5 +604,5 @@ String formatTimeAgo(DateTime dateTime) {
   if (difference.inHours < 1) return '${difference.inMinutes}m ago';
   if (difference.inHours < 24) return '${difference.inHours}h ago';
   if (difference.inDays < 7) return '${difference.inDays}d ago';
-  return DateFormat('MMM d, yyyy').format(dateTime); 
+  return DateFormat('MMM d, yyyy').format(dateTime); // Corrected DateFormat pattern
 }
