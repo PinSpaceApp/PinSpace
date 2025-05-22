@@ -170,7 +170,7 @@ class _PinCatalogPageState extends State<PinCatalogPage> {
 
   Future<void> _fetchCatalogPins() async {
     // Fetch pins and include the set name from the related 'all_sets_catalog' table.
-    // The 'all_sets_catalog!inner(name)' part ensures that 'series_name_from_source'
+    // The 'all_sets_catalog:catalog_set_id(name)' part ensures that 'series_name_from_source'
     // in CatalogPin.fromMap gets populated correctly.
     final response = await supabase
         .from('all_pins_catalog')
@@ -372,7 +372,7 @@ class _PinCatalogPageState extends State<PinCatalogPage> {
         'user_id': _currentUserId,
         'name': catalogPin.name,
         'image_url': catalogPin.imageUrl,
-        'notes': 'Added from catalog: ${catalogPin.name}', // Default note
+        'notes': null, // Changed: No automatic note
         'quantity': 1, // Default quantity
         'trade_status': 'collection', // Default trade status
         'status': 'In Collection', // Default status
