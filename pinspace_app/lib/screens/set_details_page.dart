@@ -153,20 +153,8 @@ class _SetDetailsPageState extends State<SetDetailsPage> {
               const Icon(Icons.broken_image, size: 40, color: Colors.grey),
         );
 
-        // Apply greyscale if it's a catalog set and the pin is not owned
-        // For uncategorized pins, isOwned is true, so no greyscale.
-        // For custom sets passed to this page, their pinsToDisplay should also have isOwned = true.
-        if (widget.set.originalCatalogSetId != null && !pinDisplay.isOwned) {
-          imageWidget = ColorFiltered(
-            colorFilter: const ColorFilter.matrix([
-              0.2126, 0.7152, 0.0722, 0, 0,
-              0.2126, 0.7152, 0.0722, 0, 0,
-              0.2126, 0.7152, 0.0722, 0, 0,
-              0,      0,      0,      1, 0,
-            ]),
-            child: Opacity(opacity: 0.6, child: imageWidget),
-          );
-        }
+        // Removed the ColorFiltered widget block that applied greyscale
+        // Now, all pins will display their images normally.
 
         return Card(
           clipBehavior: Clip.antiAlias,

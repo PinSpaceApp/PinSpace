@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 
 class AppColors {
   // Monsters Inc Palette
-  static const Color sulleyBlue = Color(0xFF5B90F4);
+  static const Color sulleyBlue = Color(0xFF3D4895);
   static const Color mikeCyan = Color(0xFF57C9F8);
   static const Color booPurple = Color(0xFF0087F5);
   static const Color mikeLime = Color(0xFF6FF14A);

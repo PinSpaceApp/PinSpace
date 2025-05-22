@@ -136,6 +136,7 @@ class _MySetsViewState extends State<MySetsView> {
         userSet.originalCatalogSetId = originalCatalogSetId;
 
         if (originalCatalogSetId != null) {
+          // Matched with a catalog set: Fetch all pins from catalog for this set
           final allCatalogPinsInSetResponse = await supabase
               .from('all_pins_catalog')
               .select('id, name, image_url')
@@ -154,12 +155,22 @@ class _MySetsViewState extends State<MySetsView> {
               isOwned: ownedCatalogPinIdsForThisUserSet.contains(catalogPinIdFromDb),
             ));
           }
+          // Sort pins: owned first, then by name (or ID if names are not unique enough)
+          pinsForThisSetDisplay.sort((a, b) {
+            if (a.isOwned && !b.isOwned) return -1; // a (owned) comes before b (not owned)
+            if (!a.isOwned && b.isOwned) return 1;  // b (owned) comes before a (not owned)
+            return a.name.compareTo(b.name); // Optional: sort by name within owned/unowned groups
+          });
+
         } else {
+          // User-created set not matched in catalog: Fetch user's pins directly linked to this set
+          print("User set '${userSet.name}' (ID: ${userSet.id}) not found in catalog. Fetching user's pins for this set.");
           final userOwnedPinsInThisSetResponse = await supabase
-              .from('pins')
-              .select('id, name, image_url, catalog_pin_ref_id')
+              .from('pins') // User's collection
+              .select('id, name, image_url, catalog_pin_ref_id') // Select 'id' from 'pins' table for fallback displayId
               .eq('user_id', userId)
-              .eq('set_id', userSet.id);
+              .eq('set_id', userSet.id)
+              .order('name', ascending: true); // Order custom set pins by name
 
           final List<dynamic> userOwnedPinsDataForCustomSet = userOwnedPinsInThisSetResponse as List<dynamic>;
           for (var ownedPinData in userOwnedPinsDataForCustomSet) {
@@ -182,7 +193,8 @@ class _MySetsViewState extends State<MySetsView> {
           .from('pins')
           .select('id, name, image_url, catalog_pin_ref_id')
           .eq('user_id', userId)
-          .filter('set_id', 'is', null); // Corrected: Use filter('column', 'is', null)
+          .filter('set_id', 'is', null) 
+          .order('name', ascending: true); // Order uncategorized pins by name
 
       List<DisplayPinInSet> uncategorizedDisplayPins = [];
       for (var pinData in (uncategorizedPinsResponse as List<dynamic>)) {
@@ -257,15 +269,12 @@ class _MySetsViewState extends State<MySetsView> {
 
     if (confirm == true) {
       try {
-        // The pins' set_id will be set to NULL due to the foreign key constraint `ON DELETE SET NULL`
-        // in your `pins` table for the `set_id` column.
         await supabase.from('sets').delete().match({'id': setToDelete.id, 'user_id': supabase.auth.currentUser!.id});
         
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('Set "${setToDelete.name}" deleted successfully.')),
           );
-          // Refresh the list
           _fetchMySetsAndTheirPins();
         }
       } catch (e) {
@@ -402,7 +411,7 @@ class _MySetsViewState extends State<MySetsView> {
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  if (!set.isVirtual && set.originalCatalogSetId == null) // Show delete for custom, non-virtual sets
+                  if (!set.isVirtual && set.originalCatalogSetId == null) 
                     IconButton(
                       icon: Icon(Icons.delete_outline, color: Colors.red[400], size: 20),
                       padding: EdgeInsets.zero,

@@ -15,8 +15,6 @@ final supabase = Supabase.instance.client;
 const String pythonApiUrl = 'https://colejunck1.pythonanywhere.com/remove-background';
 
 // --- Data Models ---
-// Note: PinSet is also defined here because _PinDetailsModalContent needs it.
-// In a larger app, models might live in their own directory.
 class PinSet {
   final int id;
   final String name;
@@ -44,8 +42,8 @@ class Pin {
   String name;
   String imageUrl;
   String? imageBackUrl;
-  String? setName;
-  int? setId;
+  String? setName; // Name of the set this pin belongs to in the user's 'sets' table
+  int? setId;     // ID of the set this pin belongs to in the user's 'sets' table
   int quantity;
   final DateTime addedAt;
   String? notes;
@@ -57,7 +55,7 @@ class Pin {
   String? releaseDate;
   String? tags;
   String? customSetNameFromPinTable;
-  String? catalogSeriesNameFromPinTable;
+  String? catalogSeriesNameFromPinTable; // Set name from all_pins_catalog
 
   Pin({
     required this.id,
@@ -82,6 +80,7 @@ class Pin {
 
   factory Pin.fromMap(Map<String, dynamic> map) {
     String? resolvedSetName;
+    // map['sets'] is populated by the join: sets!pins_set_id_fkey(name)
     if (map['sets'] != null && map['sets'] is Map && map['sets']['name'] != null) {
       resolvedSetName = map['sets']['name'] as String?;
     }
@@ -96,8 +95,8 @@ class Pin {
       name: map['name'] as String,
       imageUrl: map['image_url'] as String,
       imageBackUrl: map['image_back_url'] as String?,
-      setId: map['set_id'] as int?,
-      setName: resolvedSetName,
+      setId: map['set_id'] as int?, // This is the FK to user's 'sets' table
+      setName: resolvedSetName,     
       quantity: map['quantity'] as int? ?? 1,
       addedAt: DateTime.parse(map['added_at'] as String),
       notes: map['notes'] as String?,
@@ -233,7 +232,10 @@ class _MyPinsViewState extends State<MyPinsView> {
           child: _PinDetailsModalContent(
             pin: pin,
             onPinUpdated: () {
-              _refreshPinData();
+              _refreshPinData(); 
+            },
+            onPinDeleted: () { 
+              _refreshPinData(); 
             }
           ),
         );
@@ -337,8 +339,13 @@ class _MyPinsViewState extends State<MyPinsView> {
 class _PinDetailsModalContent extends StatefulWidget {
   final Pin pin;
   final VoidCallback onPinUpdated;
+  final VoidCallback onPinDeleted; 
 
-  const _PinDetailsModalContent({required this.pin, required this.onPinUpdated});
+  const _PinDetailsModalContent({
+    required this.pin, 
+    required this.onPinUpdated,
+    required this.onPinDeleted, 
+  });
 
   @override
   State<_PinDetailsModalContent> createState() => _PinDetailsModalContentState();
@@ -368,6 +375,7 @@ class _PinDetailsModalContentState extends State<_PinDetailsModalContent> with S
   bool _isEditing = false;
   bool _isSavingChanges = false;
   bool _isProcessingImage = false;
+  bool _isDeletingPin = false; 
 
   final ImagePicker _picker = ImagePicker();
 
@@ -603,6 +611,87 @@ class _PinDetailsModalContentState extends State<_PinDetailsModalContent> with S
     }
   }
 
+  Future<void> _handleDeletePin() async {
+    if (supabase.auth.currentUser == null || _isDeletingPin) return;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Confirm Delete'),
+          content: Text('Are you sure you want to delete the pin "${widget.pin.name}" from your collection?'),
+          actions: <Widget>[
+            TextButton(
+              child: const Text('Cancel'),
+              onPressed: () => Navigator.of(context).pop(false),
+            ),
+            TextButton(
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              child: const Text('Delete'),
+              onPressed: () => Navigator.of(context).pop(true),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirm != true) return;
+
+    setState(() => _isDeletingPin = true);
+
+    try {
+      final userId = supabase.auth.currentUser!.id;
+      final int? pinSetId = widget.pin.setId; 
+      final String? pinSetName = widget.pin.setName; 
+
+      await supabase.from('pins').delete().match({'id': widget.pin.id, 'user_id': userId});
+
+      if (pinSetId != null && pinSetName != null) {
+        final countResponse = await supabase
+            .from('pins')
+            .select() 
+            .eq('user_id', userId)
+            .eq('set_id', pinSetId)
+            .count(CountOption.exact);
+        
+        final int remainingPinsCount = countResponse.count;
+
+        if (remainingPinsCount == 0) {
+          final catalogSetCheckResponse = await supabase
+              .from('all_sets_catalog')
+              .select('id')
+              .eq('name', pinSetName)
+              .maybeSingle();
+
+          if (catalogSetCheckResponse != null) {
+            print("Deleting catalog-derived set '${pinSetName}' (ID: ${pinSetId}) as it's now empty.");
+            await supabase.from('sets').delete().match({'id': pinSetId, 'user_id': userId});
+          } else {
+            print("Custom set '${pinSetName}' (ID: ${pinSetId}) is now empty but will not be auto-deleted.");
+          }
+        }
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Pin "${widget.pin.name}" deleted.'), backgroundColor: Colors.orange[700]),
+        );
+        widget.onPinDeleted(); 
+        Navigator.of(context).pop(); 
+      }
+    } catch (e) {
+      print("Error deleting pin: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to delete pin: ${e.toString()}'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isDeletingPin = false);
+    }
+  }
+
+
   @override
   Widget build(BuildContext context) {
     final bool hasBackImage = (_newlyProcessedBackBytes != null) || (widget.pin.imageBackUrl != null && widget.pin.imageBackUrl!.isNotEmpty);
@@ -707,7 +796,7 @@ class _PinDetailsModalContentState extends State<_PinDetailsModalContent> with S
             _buildDetailRowOrField("Name:", _nameController, isEditing: _isEditing),
             _buildDetailRowOrField("Set:", _setControllerText, isEditing: _isEditing, isSetField: true),
             _buildDetailRowOrField("Quantity:", _quantityController, isEditing: _isEditing, isNumeric: true),
-            _buildDetailRowOrField("Notes:", _notesController, isEditing: _isEditing, isMultiLine: true),
+            _buildDetailRowOrField("Notes:", _notesController, isEditing: _isEditing, isMultiLine: true, isNotesField: true),
             _buildDetailRowOrField("Edition Size:", _editionSizeController, isEditing: _isEditing),
             _buildDetailRowOrField("Origin:", _originController, isEditing: _isEditing),
             _buildDetailRowOrField("Release Date:", _releaseDateController, isEditing: _isEditing, isDateField: true, isTagsField: false),
@@ -715,40 +804,66 @@ class _PinDetailsModalContentState extends State<_PinDetailsModalContent> with S
 
             const SizedBox(height: 24),
             Row(
-              mainAxisAlignment: MainAxisAlignment.end,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween, 
               children: [
-                TextButton(
-                  style: TextButton.styleFrom(foregroundColor: modalSecondaryText),
-                  child: const Text("Close"),
-                  onPressed: () => Navigator.of(context).pop(),
-                ),
-                const SizedBox(width: 8),
-                Flexible(
-                  child: _isEditing
-                  ? ElevatedButton.icon(
-                      icon: _isSavingChanges
-                          ? const SizedBox(width:18, height:18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                          : const Icon(Icons.save_outlined, size: 18),
-                      label: Text(_isSavingChanges ? "Saving..." : "Save Changes"),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green[700],
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                        textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)
+                // Delete Button (only in view mode)
+                if (!_isEditing)
+                  Padding( // Added padding for better touch target and spacing
+                    padding: const EdgeInsets.only(right: 8.0),
+                    child: TextButton.icon(
+                      icon: _isDeletingPin 
+                          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.red))
+                          : Icon(Icons.delete_outline, size: 18, color: Colors.red[700]),
+                      label: Text("Delete Pin", style: TextStyle(color: Colors.red[700])),
+                      style: TextButton.styleFrom(
+                        foregroundColor: Colors.red[700],
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10), // Adjust padding
                       ),
-                      onPressed: _isSavingChanges ? null : _handleSaveChanges,
-                    )
-                  : ElevatedButton.icon(
-                      icon: const Icon(Icons.edit_note, size: 18),
-                      label: const Text("Edit Pin"),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: modalPrimaryBlue,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                        textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)
-                      ),
-                      onPressed: () => setState(() => _isEditing = true),
+                      onPressed: _isDeletingPin ? null : _handleDeletePin,
                     ),
+                  )
+                else 
+                  const SizedBox.shrink(), // Occupy space if not deleting to keep right side aligned
+
+                // Group for Close and Edit/Save buttons
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextButton(
+                      style: TextButton.styleFrom(
+                        foregroundColor: modalSecondaryText,
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10), // Adjust padding
+                      ),
+                      child: const Text("Close"),
+                      onPressed: () => Navigator.of(context).pop(),
+                    ),
+                    const SizedBox(width: 8),
+                    _isEditing
+                    ? ElevatedButton.icon(
+                        icon: _isSavingChanges
+                            ? const SizedBox(width:18, height:18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                            : const Icon(Icons.save_outlined, size: 18),
+                        label: Text(_isSavingChanges ? "Saving..." : "Save Changes"),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.green[700],
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                          textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)
+                        ),
+                        onPressed: _isSavingChanges ? null : _handleSaveChanges,
+                      )
+                    : ElevatedButton.icon(
+                        icon: const Icon(Icons.edit_note, size: 18),
+                        label: const Text("Edit Pin"),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: modalPrimaryBlue,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                          textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)
+                        ),
+                        onPressed: () => setState(() => _isEditing = true),
+                      ),
+                  ],
                 ),
               ],
             ),
@@ -801,6 +916,7 @@ class _PinDetailsModalContentState extends State<_PinDetailsModalContent> with S
     bool isMultiLine = false,
     bool isDateField = false,
     bool isTagsField = false,
+    bool isNotesField = false, // Added to identify the notes field
   }) {
     Widget fieldWidget;
 
@@ -881,7 +997,7 @@ class _PinDetailsModalContentState extends State<_PinDetailsModalContent> with S
           } : null,
         );
       }
-    } else {
+    } else { // View mode
         if (isTagsField && controller.text.isNotEmpty) {
             List<String> tags = controller.text.split(',').map((tag) => tag.trim()).where((tag) => tag.isNotEmpty).toList();
             if (tags.isNotEmpty) {
@@ -901,19 +1017,22 @@ class _PinDetailsModalContentState extends State<_PinDetailsModalContent> with S
         } else if (isDateField && controller.text.isNotEmpty) {
             try {
                 DateTime date = DateFormat('yyyy-MM-dd').parse(controller.text);
-                String formattedDate = DateFormat('MMM. dd, yyyy').format(date); // Corrected format
+                String formattedDate = DateFormat('MMM. dd, yyyy').format(date);
                 fieldWidget = Text(formattedDate, style: const TextStyle(fontSize: 15, color: Colors.black87));
             } catch (e) {
                 fieldWidget = Text(controller.text, style: const TextStyle(fontSize: 15, color: Colors.red));
                 print("Error parsing date for display: $e");
             }
-        } else {
+        } else if (isNotesField && controller.text.isEmpty) { // Handle empty notes
+            fieldWidget = const Text(''); // Display empty string for notes
+        }
+         else {
           String displayText = controller.text;
           if (isSetField) {
             displayText = _selectedModalSet?.name ?? (widget.pin.setName?.isNotEmpty == true ? widget.pin.setName! : "Not in a set");
-          } else if (controller.text.isEmpty && !isDateField && !isTagsField) {
+          } else if (controller.text.isEmpty && !isDateField && !isTagsField && !isNotesField) { // Exclude notes from "N/A"
             displayText = "N/A";
-          } else if (controller.text.isEmpty && (isDateField || isTagsField)) {
+          } else if (controller.text.isEmpty && (isDateField || isTagsField)) { // Keep "Not set" for these if empty
             displayText = "Not set";
           }
           fieldWidget = Text(displayText, style: const TextStyle(fontSize: 15, color: Colors.black87), softWrap: true);
