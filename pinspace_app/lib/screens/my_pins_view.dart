@@ -228,8 +228,8 @@ class _MyPinsViewState extends State<MyPinsView> {
         return Dialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20.0)),
           elevation: 5,
-          backgroundColor: Colors.transparent,
-          child: _PinDetailsModalContent(
+          backgroundColor: Colors.transparent, // Dialog itself is transparent
+          child: _PinDetailsModalContent( // Content provides its own background
             pin: pin,
             onPinUpdated: () {
               _refreshPinData(); 
@@ -382,8 +382,20 @@ class _PinDetailsModalContentState extends State<_PinDetailsModalContent> with S
   static const Color modalPrimaryBlue = Color(0xFF0D47A1);
   static const Color modalAccentGold = Color(0xFFFFC107);
   static const Color modalSecondaryText = Color(0xFF546E7A);
-  static const Color modalBackground = Color(0xFFF8F9FA);
+  static const Color modalBackground = Color(0xFFF8F9FA); 
   static const Color modalDivider = Color(0xFFD0D0D0);
+
+  // Define a list of colors for the tags
+  final List<Color> _tagColors = [
+    Colors.blue[100]!,
+    Colors.green[100]!,
+    Colors.orange[100]!,
+    Colors.purple[100]!,
+    Colors.red[100]!,
+    Colors.teal[100]!,
+    Colors.pink[100]!,
+    Colors.indigo[100]!,
+  ];
 
   @override
   void initState() {
@@ -424,6 +436,29 @@ class _PinDetailsModalContentState extends State<_PinDetailsModalContent> with S
         }
     });
   }
+
+  void _resetFormFields() {
+    _nameController.text = widget.pin.name;
+    _setControllerText.text = widget.pin.setName ?? "";
+     if (widget.pin.setId != null && _modalExistingSets.isNotEmpty) {
+        try {
+            _selectedModalSet = _modalExistingSets.firstWhere((s) => s.id == widget.pin.setId);
+        } catch (e) {
+             _selectedModalSet = null;
+        }
+    } else {
+        _selectedModalSet = null;
+    }
+    _quantityController.text = widget.pin.quantity.toString();
+    _notesController.text = widget.pin.notes ?? "";
+    _editionSizeController.text = widget.pin.editionSize ?? "";
+    _originController.text = widget.pin.origin ?? "";
+    _releaseDateController.text = widget.pin.releaseDate ?? "";
+    _tagsController.text = widget.pin.tags ?? "";
+    _newlyProcessedFrontBytes = null;
+    _newlyProcessedBackBytes = null;
+  }
+
 
   Future<void> _fetchSetsForModal() async {
       if (supabase.auth.currentUser == null) return;
@@ -534,7 +569,7 @@ class _PinDetailsModalContentState extends State<_PinDetailsModalContent> with S
     String? newReleaseDateForDb = newReleaseDateText.isEmpty ? null : newReleaseDateText;
 
     if (newReleaseDateForDb != null && !RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(newReleaseDateForDb)) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Invalid release date format. Please use YYYY-MM-DD.")));
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Invalid release date format. Please use yyyy-MM-dd."))); 
         setState(() => _isSavingChanges = false);
         return;
     }
@@ -647,16 +682,17 @@ class _PinDetailsModalContentState extends State<_PinDetailsModalContent> with S
       await supabase.from('pins').delete().match({'id': widget.pin.id, 'user_id': userId});
 
       if (pinSetId != null && pinSetName != null) {
+        // Corrected way to get count:
         final countResponse = await supabase
             .from('pins')
-            .select() 
+            .select() // No need to specify columns if we are just counting
             .eq('user_id', userId)
             .eq('set_id', pinSetId)
-            .count(CountOption.exact);
+            .count(CountOption.exact); // Correctly chain .count()
         
-        final int remainingPinsCount = countResponse.count;
+        final int remainingPinsCount = countResponse.count ?? 0;
 
-        if (remainingPinsCount == 0) {
+        if (remainingPinsCount == 0) { 
           final catalogSetCheckResponse = await supabase
               .from('all_sets_catalog')
               .select('id')
@@ -698,11 +734,10 @@ class _PinDetailsModalContentState extends State<_PinDetailsModalContent> with S
     final String currentFrontDisplayUrl = widget.pin.imageUrl;
     final String? currentBackDisplayUrl = widget.pin.imageBackUrl;
 
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 15),
+    return Container( 
       decoration: BoxDecoration(
-        color: modalBackground,
-        borderRadius: BorderRadius.circular(24.0),
+        color: modalBackground, 
+        borderRadius: BorderRadius.circular(24.0), 
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.15),
@@ -711,164 +746,183 @@ class _PinDetailsModalContentState extends State<_PinDetailsModalContent> with S
           )
         ]
       ),
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            AspectRatio(
-              aspectRatio: 1.0,
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  AnimatedBuilder(
-                    animation: _flipAnimation,
-                    builder: (context, child) {
-                      final angle = _flipAnimation.value * math.pi;
-                      final transform = Matrix4.identity()
-                        ..setEntry(3, 2, 0.001)
-                        ..rotateY(angle);
-                      return Transform(
-                        transform: transform,
-                        alignment: Alignment.center,
-                        child: _flipAnimation.value < 0.5
-                            ? _buildImageSide(
-                                _newlyProcessedFrontBytes,
-                                currentFrontDisplayUrl,
-                                isBack: false
-                              )
-                            : Transform(
-                                transform: Matrix4.identity()..rotateY(math.pi),
-                                alignment: Alignment.center,
-                                child: _buildImageSide(
-                                  _newlyProcessedBackBytes,
-                                  currentBackDisplayUrl ?? currentFrontDisplayUrl,
-                                  isBack: true
-                                ),
-                              ),
-                      );
-                    }
-                  ),
-                  if (hasBackImage || _newlyProcessedFrontBytes != null || _newlyProcessedBackBytes != null)
-                    Positioned(
-                      bottom: 10,
-                      right: 10,
-                      child: Material(
-                        color: Colors.black.withOpacity(0.6),
-                        borderRadius: BorderRadius.circular(24),
-                        elevation: 2,
-                        child: IconButton(
-                          icon: const Icon(Icons.flip_camera_android_outlined, color: Colors.white, size: 22),
-                          tooltip: _showFront ? "Show Back" : "Show Front",
-                          onPressed: (hasBackImage || _newlyProcessedBackBytes != null) ? _flipImage : null,
+      child: Column(
+        mainAxisSize: MainAxisSize.min, 
+        children: [
+          Flexible( 
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 0), 
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  AspectRatio(
+                    aspectRatio: 1.0,
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        AnimatedBuilder(
+                          animation: _flipAnimation,
+                          builder: (context, child) {
+                            final angle = _flipAnimation.value * math.pi;
+                            final transform = Matrix4.identity()
+                              ..setEntry(3, 2, 0.001)
+                              ..rotateY(angle);
+                            return Transform(
+                              transform: transform,
+                              alignment: Alignment.center,
+                              child: _flipAnimation.value < 0.5
+                                  ? _buildImageSide(
+                                      _newlyProcessedFrontBytes,
+                                      currentFrontDisplayUrl,
+                                      isBack: false
+                                    )
+                                  : Transform(
+                                      transform: Matrix4.identity()..rotateY(math.pi),
+                                      alignment: Alignment.center,
+                                      child: _buildImageSide(
+                                        _newlyProcessedBackBytes,
+                                        currentBackDisplayUrl ?? currentFrontDisplayUrl,
+                                        isBack: true
+                                      ),
+                                    ),
+                            );
+                          }
                         ),
-                      ),
+                        if (hasBackImage || _newlyProcessedFrontBytes != null || _newlyProcessedBackBytes != null)
+                          Positioned(
+                            bottom: 10,
+                            right: 10,
+                            child: Material(
+                              color: Colors.black.withOpacity(0.6),
+                              borderRadius: BorderRadius.circular(24),
+                              elevation: 2,
+                              child: IconButton(
+                                icon: const Icon(Icons.flip_camera_android_outlined, color: Colors.white, size: 22),
+                                tooltip: _showFront ? "Show Back" : "Show Front",
+                                onPressed: (hasBackImage || _newlyProcessedBackBytes != null) ? _flipImage : null,
+                              ),
+                            ),
+                          ),
+                        if (_isProcessingImage)
+                          Container(
+                              color: Colors.black.withOpacity(0.3),
+                              child: const Center(child: CircularProgressIndicator(color: modalAccentGold))),
+                      ],
                     ),
-                  if (_isProcessingImage)
-                    Container(
-                        color: Colors.black.withOpacity(0.3),
-                        child: const Center(child: CircularProgressIndicator(color: modalAccentGold))),
+                  ),
+                  const SizedBox(height: 12),
+                    if (_isEditing) Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: [
+                      TextButton.icon(
+                        icon: Icon(Icons.photo_camera_outlined, size: 18, color: modalSecondaryText),
+                        label: Text("Front Image", style: TextStyle(color: modalSecondaryText, fontSize: 13)),
+                        onPressed: () => _changeImage(ImageTarget.front),
+                      ),
+                      TextButton.icon(
+                        icon: Icon(Icons.photo_camera_outlined, size: 18, color: modalSecondaryText),
+                        label: Text(hasBackImage || _newlyProcessedBackBytes != null ? "Back Image" : "Add Back", style: TextStyle(color: modalSecondaryText, fontSize: 13)),
+                        onPressed: () => _changeImage(ImageTarget.back),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Divider(color: modalDivider.withOpacity(0.7)),
+                  const SizedBox(height: 12),
+                  Row( 
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Text("Pin Details", style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600, color: modalPrimaryBlue)),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (!_isEditing)
+                            PopupMenuButton<String>(
+                              icon: Icon(Icons.more_vert, color: modalSecondaryText),
+                              tooltip: "More options",
+                              onSelected: (String result) {
+                                if (result == 'edit') {
+                                  setState(() => _isEditing = true);
+                                } else if (result == 'delete') {
+                                  _handleDeletePin();
+                                }
+                              },
+                              itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+                                const PopupMenuItem<String>(
+                                  value: 'edit',
+                                  child: ListTile(
+                                    leading: Icon(Icons.edit_note_outlined),
+                                    title: Text('Edit Pin Details'),
+                                  ),
+                                ),
+                                PopupMenuItem<String>(
+                                  value: 'delete',
+                                  child: ListTile(
+                                    leading: _isDeletingPin 
+                                        ? SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.red[700]))
+                                        : Icon(Icons.delete_outline, color: Colors.red[700]),
+                                    title: Text('Remove From My Collection', style: TextStyle(color: Colors.red[700])),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          if (_isEditing) ...[
+                             _isSavingChanges 
+                              ? const SizedBox(width: 28, height: 28, child: Padding(padding: EdgeInsets.all(4.0), child:CircularProgressIndicator(strokeWidth: 2.5, color: Colors.green)))
+                              : IconButton(
+                                  icon: Icon(Icons.save_outlined, color: Colors.green[700], size: 28),
+                                  tooltip: "Save Changes",
+                                  onPressed: _handleSaveChanges,
+                                ),
+                            IconButton(
+                              icon: Icon(Icons.cancel_outlined, color: Colors.orange[800], size: 28),
+                              tooltip: "Cancel Edit",
+                              onPressed: () {
+                                setState(() {
+                                  _isEditing = false;
+                                  _resetFormFields(); // Reset fields to original values
+                                });
+                              },
+                            ),
+                          ],
+                        ],
+                      )
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  _buildDetailRowOrField("Name:", _nameController, isEditing: _isEditing),
+                  _buildDetailRowOrField("Set:", _setControllerText, isEditing: _isEditing, isSetField: true),
+                  _buildDetailRowOrField("Quantity:", _quantityController, isEditing: _isEditing, isNumeric: true),
+                  _buildDetailRowOrField("Notes:", _notesController, isEditing: _isEditing, isMultiLine: true, isNotesField: true),
+                  _buildDetailRowOrField("Edition Size:", _editionSizeController, isEditing: _isEditing),
+                  _buildDetailRowOrField("Origin:", _originController, isEditing: _isEditing),
+                  _buildDetailRowOrField("Release Date:", _releaseDateController, isEditing: _isEditing, isDateField: true, isTagsField: false),
+                  _buildDetailRowOrField("Tags:", _tagsController, isEditing: _isEditing, isTagsField: true),
+                  const SizedBox(height: 10), 
                 ],
               ),
             ),
-            const SizedBox(height: 12),
-              if (_isEditing) Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
+          ),
+          // Footer area for the Close button
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end, 
               children: [
-                TextButton.icon(
-                  icon: Icon(Icons.photo_camera_outlined, size: 18, color: modalSecondaryText),
-                  label: Text("Front Image", style: TextStyle(color: modalSecondaryText, fontSize: 13)),
-                  onPressed: () => _changeImage(ImageTarget.front),
-                ),
-                TextButton.icon(
-                  icon: Icon(Icons.photo_camera_outlined, size: 18, color: modalSecondaryText),
-                  label: Text(hasBackImage || _newlyProcessedBackBytes != null ? "Back Image" : "Add Back", style: TextStyle(color: modalSecondaryText, fontSize: 13)),
-                  onPressed: () => _changeImage(ImageTarget.back),
+                TextButton(
+                  style: TextButton.styleFrom(
+                    foregroundColor: modalSecondaryText,
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  ),
+                  child: const Text("Close"),
+                  onPressed: () => Navigator.of(context).pop(),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            Divider(color: modalDivider.withOpacity(0.7)),
-            const SizedBox(height: 12),
-
-            Text("Pin Details", style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600, color: modalPrimaryBlue)),
-            const SizedBox(height: 16),
-            _buildDetailRowOrField("Name:", _nameController, isEditing: _isEditing),
-            _buildDetailRowOrField("Set:", _setControllerText, isEditing: _isEditing, isSetField: true),
-            _buildDetailRowOrField("Quantity:", _quantityController, isEditing: _isEditing, isNumeric: true),
-            _buildDetailRowOrField("Notes:", _notesController, isEditing: _isEditing, isMultiLine: true, isNotesField: true),
-            _buildDetailRowOrField("Edition Size:", _editionSizeController, isEditing: _isEditing),
-            _buildDetailRowOrField("Origin:", _originController, isEditing: _isEditing),
-            _buildDetailRowOrField("Release Date:", _releaseDateController, isEditing: _isEditing, isDateField: true, isTagsField: false),
-            _buildDetailRowOrField("Tags:", _tagsController, isEditing: _isEditing, isTagsField: true),
-
-            const SizedBox(height: 24),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween, 
-              children: [
-                // Delete Button (only in view mode)
-                if (!_isEditing)
-                  Padding( // Added padding for better touch target and spacing
-                    padding: const EdgeInsets.only(right: 8.0),
-                    child: TextButton.icon(
-                      icon: _isDeletingPin 
-                          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.red))
-                          : Icon(Icons.delete_outline, size: 18, color: Colors.red[700]),
-                      label: Text("Delete Pin", style: TextStyle(color: Colors.red[700])),
-                      style: TextButton.styleFrom(
-                        foregroundColor: Colors.red[700],
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10), // Adjust padding
-                      ),
-                      onPressed: _isDeletingPin ? null : _handleDeletePin,
-                    ),
-                  )
-                else 
-                  const SizedBox.shrink(), // Occupy space if not deleting to keep right side aligned
-
-                // Group for Close and Edit/Save buttons
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TextButton(
-                      style: TextButton.styleFrom(
-                        foregroundColor: modalSecondaryText,
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10), // Adjust padding
-                      ),
-                      child: const Text("Close"),
-                      onPressed: () => Navigator.of(context).pop(),
-                    ),
-                    const SizedBox(width: 8),
-                    _isEditing
-                    ? ElevatedButton.icon(
-                        icon: _isSavingChanges
-                            ? const SizedBox(width:18, height:18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                            : const Icon(Icons.save_outlined, size: 18),
-                        label: Text(_isSavingChanges ? "Saving..." : "Save Changes"),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green[700],
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                          textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)
-                        ),
-                        onPressed: _isSavingChanges ? null : _handleSaveChanges,
-                      )
-                    : ElevatedButton.icon(
-                        icon: const Icon(Icons.edit_note, size: 18),
-                        label: const Text("Edit Pin"),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: modalPrimaryBlue,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                          textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)
-                        ),
-                        onPressed: () => setState(() => _isEditing = true),
-                      ),
-                  ],
-                ),
-              ],
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -916,7 +970,7 @@ class _PinDetailsModalContentState extends State<_PinDetailsModalContent> with S
     bool isMultiLine = false,
     bool isDateField = false,
     bool isTagsField = false,
-    bool isNotesField = false, // Added to identify the notes field
+    bool isNotesField = false, 
   }) {
     Widget fieldWidget;
 
@@ -1002,14 +1056,19 @@ class _PinDetailsModalContentState extends State<_PinDetailsModalContent> with S
             List<String> tags = controller.text.split(',').map((tag) => tag.trim()).where((tag) => tag.isNotEmpty).toList();
             if (tags.isNotEmpty) {
                 fieldWidget = Wrap(
-                    spacing: 6.0,
-                    runSpacing: 0.0,
-                    children: tags.map((tag) => Chip(
-                        label: Text(tag, style: TextStyle(fontSize: 12, color: Colors.grey[800])),
-                        backgroundColor: Colors.grey[300],
-                        padding: EdgeInsets.symmetric(horizontal: 8.0, vertical: 2.0),
+                    spacing: 6.0, 
+                    runSpacing: 4.0, 
+                    children: tags.asMap().entries.map((entry) { 
+                      int idx = entry.key;
+                      String tag = entry.value;
+                      return Chip(
+                        label: Text(tag, style: TextStyle(fontSize: 11, color: Colors.black87)), 
+                        backgroundColor: _tagColors[idx % _tagColors.length], 
+                        padding: EdgeInsets.symmetric(horizontal: 6.0, vertical: 0.0), 
+                        labelPadding: EdgeInsets.symmetric(horizontal: 4.0, vertical: 0.0), 
                         materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    )).toList(),
+                      );
+                    }).toList(),
                 );
             } else {
                  fieldWidget = const Text("No tags", style: TextStyle(fontSize: 15, color: Colors.black54, fontStyle: FontStyle.italic));
@@ -1023,16 +1082,16 @@ class _PinDetailsModalContentState extends State<_PinDetailsModalContent> with S
                 fieldWidget = Text(controller.text, style: const TextStyle(fontSize: 15, color: Colors.red));
                 print("Error parsing date for display: $e");
             }
-        } else if (isNotesField && controller.text.isEmpty) { // Handle empty notes
-            fieldWidget = const Text(''); // Display empty string for notes
+        } else if (isNotesField && controller.text.isEmpty) { 
+            fieldWidget = const Text(''); 
         }
          else {
           String displayText = controller.text;
           if (isSetField) {
             displayText = _selectedModalSet?.name ?? (widget.pin.setName?.isNotEmpty == true ? widget.pin.setName! : "Not in a set");
-          } else if (controller.text.isEmpty && !isDateField && !isTagsField && !isNotesField) { // Exclude notes from "N/A"
+          } else if (controller.text.isEmpty && !isDateField && !isTagsField && !isNotesField) { 
             displayText = "N/A";
-          } else if (controller.text.isEmpty && (isDateField || isTagsField)) { // Keep "Not set" for these if empty
+          } else if (controller.text.isEmpty && (isDateField || isTagsField)) { 
             displayText = "Not set";
           }
           fieldWidget = Text(displayText, style: const TextStyle(fontSize: 15, color: Colors.black87), softWrap: true);
@@ -1059,3 +1118,4 @@ class _PinDetailsModalContentState extends State<_PinDetailsModalContent> with S
     );
   }
 }
+
