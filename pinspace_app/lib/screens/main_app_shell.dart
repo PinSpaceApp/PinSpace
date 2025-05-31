@@ -10,7 +10,7 @@ import 'marketplace_page.dart';
 import 'settings_page.dart';
 import 'user_profile_page.dart'; 
 import 'search_results_page.dart'; 
-import 'pin_catalog_page.dart'; // <<--- UNCOMMENTED and assuming this file exists
+import 'pin_catalog_page.dart'; 
 
 final supabase = Supabase.instance.client;
 
@@ -37,16 +37,21 @@ class _MainAppShellState extends State<MainAppShell> {
   bool _isLoadingAvatar = true;
   late final StreamSubscription<AuthState> _authStateSubscription;
 
-  static final List<Widget> _widgetOptions = <Widget>[
-    DashboardPage(),
-    MyPinsPage(),
-    CommunityPage(),
-    MarketplacePage(),
-  ];
+  // ✨ MODIFIED: _widgetOptions is now an instance variable to access _onItemTapped
+  late final List<Widget> _widgetOptions;
 
   @override
   void initState() {
     super.initState();
+
+    // ✨ MODIFIED: Initialize _widgetOptions here and pass the callback
+    _widgetOptions = <Widget>[
+      DashboardPage(onNavigateRequest: _onItemTapped), // Pass the callback
+      MyPinsPage(),
+      CommunityPage(),
+      MarketplacePage(),
+    ];
+
     _fetchUserProfileAvatar();
 
     _authStateSubscription = supabase.auth.onAuthStateChange.listen((data) {
@@ -84,7 +89,7 @@ class _MainAppShellState extends State<MainAppShell> {
             _isLoadingAvatar = false;
           });
         } else if (mounted) {
-            setState(() {
+          setState(() {
             _userAvatarUrl = null; 
             _isLoadingAvatar = false;
           });
@@ -110,10 +115,16 @@ class _MainAppShellState extends State<MainAppShell> {
 
 
   void _onItemTapped(int index) {
-    setState(() {
-      _selectedIndex = index;
-      _pageController.jumpToPage(index);
-    });
+    // Ensure index is within bounds before attempting to jump
+    if (index >= 0 && index < _widgetOptions.length) {
+        setState(() {
+        _selectedIndex = index;
+        _pageController.jumpToPage(index);
+        });
+    } else {
+        print("Error: Invalid page index $index requested for navigation.");
+        // Optionally, navigate to a default/error page or show a message
+    }
   }
 
   void _onScannerButtonPressed() {
@@ -144,7 +155,7 @@ class _MainAppShellState extends State<MainAppShell> {
         break;
       case ProfileMenuAction.myMarket:
         if (_selectedIndex != 3) { 
-          _onItemTapped(3);
+          _onItemTapped(3); // Index for MarketplacePage
         }
         break;
       case ProfileMenuAction.myTrophies:
@@ -155,7 +166,7 @@ class _MainAppShellState extends State<MainAppShell> {
             settings: const RouteSettings(name: MainAppShell.userProfileRouteName),
           )
         ).then((_){
-           if (mounted) {
+            if (mounted) {
             setState(() {});
           }
         });
@@ -163,7 +174,7 @@ class _MainAppShellState extends State<MainAppShell> {
       case ProfileMenuAction.settings:
         Navigator.push(context, MaterialPageRoute(builder: (context) => const SettingsPage()))
         .then((_){
-           if (mounted) {
+            if (mounted) {
             _fetchUserProfileAvatar(); 
             setState(() {}); 
           }
@@ -193,7 +204,6 @@ class _MainAppShellState extends State<MainAppShell> {
   void _onTopIconPressed(String iconName) {
     print('$iconName icon pressed!');
     if (iconName == 'Catalog') {
-        // <<--- MODIFIED: Navigate to PinCatalogPage --- >>
         Navigator.push(context, MaterialPageRoute(builder: (context) => const PinCatalogPage()));
     } else if (iconName == 'Notifications') {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Notifications page coming soon!")));
@@ -249,21 +259,20 @@ class _MainAppShellState extends State<MainAppShell> {
     bool isSearchResultsPageActive = false;
     if (currentRoute is MaterialPageRoute) {
         try {
-           final widget = currentRoute.builder(context);
-           if (widget is SearchResultsPage) {
-             isSearchResultsPageActive = true;
-           }
+            final widget = currentRoute.builder(context);
+            if (widget is SearchResultsPage) {
+                isSearchResultsPageActive = true;
+            }
         } catch (e) {
-          print("Error checking route type for SearchResultsPage: $e");
+            print("Error checking route type for SearchResultsPage: $e");
         }
     }
     
-    // <<--- NEW: Check if PinCatalogPage is active --- >>
     bool isPinCatalogPageActive = false;
     if (currentRoute is MaterialPageRoute) {
       try {
         final widget = currentRoute.builder(context);
-        if (widget is PinCatalogPage) { // Assuming PinCatalogPage is the class name
+        if (widget is PinCatalogPage) { 
           isPinCatalogPageActive = true;
         }
       } catch (e) {
@@ -271,7 +280,6 @@ class _MainAppShellState extends State<MainAppShell> {
       }
     }
 
-    // <<--- MODIFIED: Shell AppBar hidden if UserProfilePage OR PinCatalogPage is active --- >>
     final bool shouldShowShellAppBarAndSearch = !isUserProfilePageActive && !isSearchResultsPageActive && !isPinCatalogPageActive;
     
     final double pageViewTopWhenShellAppBarVisible = safeAreaTopPadding + totalAppBarAreaHeight + (searchBarHeight / 2) + 8.0;
@@ -338,7 +346,7 @@ class _MainAppShellState extends State<MainAppShell> {
                         value: ProfileMenuAction.myMarket,
                         child: ListTile(leading: Icon(Icons.store_mall_directory_outlined), title: Text('My Market')),
                       ),
-                       const PopupMenuItem<ProfileMenuAction>( 
+                        const PopupMenuItem<ProfileMenuAction>( 
                         value: ProfileMenuAction.myTrophies,
                         child: ListTile(leading: Icon(Icons.emoji_events_outlined), title: Text('My Trophies')),
                       ),
@@ -425,3 +433,4 @@ class _MainAppShellState extends State<MainAppShell> {
     }
   }
 }
+

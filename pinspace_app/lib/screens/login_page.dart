@@ -122,7 +122,7 @@ class _LoginPageState extends State<LoginPage> {
       labelText: label,
       labelStyle: const TextStyle(color: Colors.white70),
       filled: true,
-      fillColor: Colors.black.withOpacity(0.5), // Semi-transparent background
+      fillColor: Colors.black.withOpacity(0.1), // Semi-transparent background
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
         borderSide: BorderSide.none, // No visible border
@@ -172,7 +172,7 @@ class _LoginPageState extends State<LoginPage> {
                           fontSize: 18,
                           fontWeight: FontWeight.w500,
                            shadows: [
-                             Shadow(blurRadius: 4.0, color: Colors.black54, offset: Offset(1,1))
+                             Shadow(blurRadius: 4.0, color: Colors.black, offset: Offset(1,1))
                            ]
                         ),
                       ),
