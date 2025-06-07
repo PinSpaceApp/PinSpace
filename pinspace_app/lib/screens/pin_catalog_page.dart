@@ -2,8 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
-// import 'user_profile_page.dart'; // Assuming this is for navigation, not directly used here
-// import 'main_app_shell.dart'; // Assuming this is for navigation, not directly used here
+import 'dart:async'; // Required for Timer for debouncing
 
 final supabase = Supabase.instance.client;
 
@@ -91,7 +90,6 @@ class PinCatalogPage extends StatefulWidget {
 class _PinCatalogPageState extends State<PinCatalogPage> {
   CatalogViewMode _viewMode = CatalogViewMode.pins;
   List<CatalogPin> _catalogPins = [];
-  List<CatalogPin> _filteredCatalogPins = [];
   List<CatalogSet> _catalogSets = [];
 
   bool _isLoading = true;
@@ -103,39 +101,46 @@ class _PinCatalogPageState extends State<PinCatalogPage> {
   final TextEditingController _searchController = TextEditingController();
   bool _isSearching = false;
 
+  // Pagination variables
+  int _currentPage = 0;
+  final int _pageSize = 30; // Fetch 30 items per page
+  bool _hasMorePins = true; // True if there might be more pins to load
+
+  Timer? _debounce; // For debouncing search input
+
   @override
   void initState() {
     super.initState();
     _currentUserId = supabase.auth.currentUser?.id;
     _searchController.addListener(_onSearchChanged);
-    _fetchData();
+    _fetchData(); // Initial data fetch
   }
 
   @override
   void dispose() {
     _searchController.removeListener(_onSearchChanged);
     _searchController.dispose();
+    _debounce?.cancel();
     super.dispose();
   }
 
+  // Handles search input changes with a debounce to prevent too many API calls
   void _onSearchChanged() {
-    if (!mounted) return;
-    final query = _searchController.text.toLowerCase();
-    setState(() {
-      if (query.isEmpty) {
-        _filteredCatalogPins = List.from(_catalogPins);
-      } else {
-        _filteredCatalogPins = _catalogPins.where((pin) {
-          return (pin.name.toLowerCase().contains(query)) ||
-              (pin.tags?.toLowerCase().contains(query) ?? false) ||
-              (pin.origin?.toLowerCase().contains(query) ?? false) ||
-              (pin.customSetName?.toLowerCase().contains(query) ?? false) ||
-              (pin.seriesNameFromSource?.toLowerCase().contains(query) ?? false);
-        }).toList();
+    if (_debounce?.isActive ?? false) _debounce!.cancel();
+    _debounce = Timer(const Duration(milliseconds: 500), () {
+      // Only trigger a new search if the view mode is pins
+      if (_viewMode == CatalogViewMode.pins && mounted) {
+        // Reset pagination and fetch pins based on the new search query
+        setState(() {
+          _currentPage = 0;
+          _catalogPins.clear(); // Clear existing pins for new search results
+          _hasMorePins = true; // Assume there might be more results
+          _isLoading = true; // Show loading indicator
+        });
+        _fetchCatalogPins(searchQuery: _searchController.text);
       }
     });
   }
-
 
   Future<void> _fetchData() async {
     if (!mounted) return;
@@ -149,7 +154,11 @@ class _PinCatalogPageState extends State<PinCatalogPage> {
         await _fetchOwnedCatalogPinIds();
       }
       if (_viewMode == CatalogViewMode.pins) {
-        await _fetchCatalogPins();
+        // When switching view mode or initial load, reset pagination and fetch first page
+        _currentPage = 0;
+        _catalogPins.clear();
+        _hasMorePins = true;
+        await _fetchCatalogPins(searchQuery: _searchController.text);
       } else {
         await _fetchCatalogSets();
       }
@@ -168,47 +177,91 @@ class _PinCatalogPageState extends State<PinCatalogPage> {
     }
   }
 
-  Future<void> _fetchCatalogPins() async {
-    // Fetch pins and include the set name from the related 'all_sets_catalog' table.
-    // The 'all_sets_catalog:catalog_set_id(name)' part ensures that 'series_name_from_source'
-    // in CatalogPin.fromMap gets populated correctly.
-    final response = await supabase
-        .from('all_pins_catalog')
-        .select('*, all_sets_catalog:catalog_set_id(name)') // Use alias for clarity if needed, or rely on FK name
-        .order('name', ascending: true)
-        .limit(200);
-
+  Future<void> _fetchCatalogPins({String? searchQuery}) async {
     if (!mounted) return;
-
-    final List<dynamic> data = response as List<dynamic>;
-    print("--- Raw Data from _fetchCatalogPins ---");
-    for (var item in data) {
-        print(item);
-    }
-    print("------------------------------------");
-
     setState(() {
-      _catalogPins = data.map((map) {
+      if (_currentPage == 0) {
+        _isLoading = true; // Show loading on initial load or new search
+      }
+      _error = null;
+    });
+
+    try {
+      // Start building the query by selecting columns.
+      // This returns a PostgrestFilterBuilder.
+      var query = supabase
+          .from('all_pins_catalog')
+          .select('*, all_sets_catalog:catalog_set_id(name)');
+
+      // Apply search filter if query is provided and not empty
+      if (searchQuery != null && searchQuery.isNotEmpty) {
+        final String searchPattern = '%${searchQuery.toLowerCase()}%';
+        // Apply the 'or' filter. Removed 'all_sets_catalog.name.ilike'
+        // from this OR clause to fix the 400 error, as directly filtering
+        // on joined table columns within a single OR string isn't directly supported
+        // in this manner by the Supabase client.
+        query = query.or(
+          'name.ilike.$searchPattern,'
+          'tags.ilike.$searchPattern,'
+          'origin.ilike.$searchPattern,'
+          'custom_set_name.ilike.$searchPattern',
+        );
+      }
+
+      // Now apply order and pagination.
+      // These methods (`order` and `range`) return a PostgrestTransformBuilder.
+      // We can chain them directly and then await the final builder.
+      final int offset = _currentPage * _pageSize;
+      final response = await query
+          .order('name', ascending: true) // Returns PostgrestTransformBuilder
+          .range(offset, offset + _pageSize - 1); // Returns PostgrestTransformBuilder
+
+      if (!mounted) return;
+
+      final List<dynamic> data = response as List<dynamic>;
+
+      List<CatalogPin> fetchedPins = data.map((map) {
         final pinMap = map as Map<String, dynamic>;
-        final setInfo = pinMap['all_sets_catalog'] as Map<String, dynamic>?; // Supabase nests joined data
+        final setInfo = pinMap['all_sets_catalog'] as Map<String, dynamic>?;
         String? seriesName;
 
         if (setInfo != null) {
           seriesName = setInfo['name'] as String?;
-        } else {
-           // This means catalog_set_id was null or the join didn't find a match.
-           // If using `!inner` in select, this case (setInfo being null) for a pin row shouldn't happen
-           // unless the structure of response is different than expected.
-           // If not using `!inner`, pins without a set are possible.
         }
-        // Add the extracted series name to the map before passing to CatalogPin.fromMap
-        // This ensures CatalogPin.fromMap can find 'series_name_from_source'.
         pinMap['series_name_from_source'] = seriesName;
         return CatalogPin.fromMap(pinMap);
       }).toList();
-      _filteredCatalogPins = List.from(_catalogPins);
-      _onSearchChanged();
+
+      setState(() {
+        if (_currentPage == 0) {
+          _catalogPins = fetchedPins; // Replace for initial load or new search
+        } else {
+          _catalogPins.addAll(fetchedPins); // Append for pagination
+        }
+        _hasMorePins = fetchedPins.length == _pageSize; // If we got less than page size, no more pages
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = "Failed to load pins: ${e.toString()}";
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _loadMorePins() async {
+    if (_isLoading || !_hasMorePins) return;
+    setState(() {
+      _isLoading = true; // Indicate loading for next page
     });
+    _currentPage++;
+    await _fetchCatalogPins(searchQuery: _searchController.text);
   }
 
   Future<void> _fetchCatalogSets() async {
@@ -216,7 +269,8 @@ class _PinCatalogPageState extends State<PinCatalogPage> {
         .from('all_sets_catalog')
         .select()
         .order('name', ascending: true)
-        .limit(100);
+        .limit(100); // Sets not paginated as per request focus
+
     if (!mounted) return;
     final List<dynamic> data = response as List<dynamic>;
     setState(() {
@@ -266,12 +320,9 @@ class _PinCatalogPageState extends State<PinCatalogPage> {
     }
   }
 
-
   Future<void> _toggleWishlist(CatalogPin pin) async {
     if (_currentUserId == null || !mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("You need to be logged in to manage your wishlist.")),
-      );
+      _showSnackBar(context, "You need to be logged in to manage your wishlist.");
       return;
     }
     final isCurrentlyWishlisted = _wishlistedPinIds.contains(pin.id);
@@ -289,10 +340,10 @@ class _PinCatalogPageState extends State<PinCatalogPage> {
 
       if (isCurrentlyWishlisted) {
         await supabase.from('user_wishlist').delete().match({'user_id': _currentUserId!, 'pin_catalog_id': catalogPinIdAsInt});
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("'${pin.name}' removed from wishlist.")));
+        if (mounted) _showSnackBar(context, "'${pin.name}' removed from wishlist.");
       } else {
         await supabase.from('user_wishlist').insert({'user_id': _currentUserId!, 'pin_catalog_id': catalogPinIdAsInt});
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("'${pin.name}' added to wishlist!")));
+        if (mounted) _showSnackBar(context, "'${pin.name}' added to wishlist!");
       }
     } catch (e) {
       print("Error toggling wishlist: $e");
@@ -301,23 +352,20 @@ class _PinCatalogPageState extends State<PinCatalogPage> {
           if (isCurrentlyWishlisted) _wishlistedPinIds.add(pin.id);
           else _wishlistedPinIds.remove(pin.id);
         });
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error updating wishlist: ${e.toString()}"), backgroundColor: Colors.red));
+        _showSnackBar(context, "Error updating wishlist: ${e.toString()}", isError: true);
       }
     }
   }
 
   Future<void> _addPinToMyCollection(CatalogPin catalogPin) async {
     if (_currentUserId == null || !mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("You need to be logged in to add pins.")));
+      _showSnackBar(context, "You need to be logged in to add pins.");
       return;
     }
 
-    // catalogPin.id is a String, _ownedCatalogPinIds stores String IDs.
     if (_ownedCatalogPinIds.contains(catalogPin.id)) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("'${catalogPin.name}' is already in your collection.")),
-        );
-        return;
+      _showSnackBar(context, "'${catalogPin.name}' is already in your collection.");
+      return;
     }
 
     print("--- Adding Pin to Collection ---");
@@ -337,11 +385,11 @@ class _PinCatalogPageState extends State<PinCatalogPage> {
             .select('id')
             .eq('user_id', _currentUserId!)
             .eq('name', catalogSetName)
-            .maybeSingle(); // Use maybeSingle to get one row or null
+            .maybeSingle();
 
         if (setLookupResponse != null && setLookupResponse['id'] != null) {
           // Set already exists for the user
-          userSetIdForPinRecord = setLookupResponse['id'] as int?; // Supabase returns numbers as int
+          userSetIdForPinRecord = setLookupResponse['id'] as int?;
           print("Set '$catalogSetName' already exists for user with ID: $userSetIdForPinRecord");
         } else {
           // Set does not exist for the user, so insert it into their 'sets' table
@@ -351,19 +399,12 @@ class _PinCatalogPageState extends State<PinCatalogPage> {
               .insert({
                 'user_id': _currentUserId!,
                 'name': catalogSetName,
-                // 'created_at' will be defaulted by the database
               })
-              .select('id') // Select the ID of the newly inserted set
-              .single();    // Expect a single row back
+              .select('id')
+              .single();
 
           userSetIdForPinRecord = newSetResponse['id'] as int?;
           print("New set '$catalogSetName' added for user with ID: $userSetIdForPinRecord");
-          if (mounted) {
-            // Optionally, notify user that the set was also added
-            // ScaffoldMessenger.of(context).showSnackBar(
-            //   SnackBar(content: Text("Set '$catalogSetName' also added to your sets.")),
-            // );
-          }
         }
       }
 
@@ -372,21 +413,20 @@ class _PinCatalogPageState extends State<PinCatalogPage> {
         'user_id': _currentUserId,
         'name': catalogPin.name,
         'image_url': catalogPin.imageUrl,
-        'notes': null, // Changed: No automatic note
-        'quantity': 1, // Default quantity
-        'trade_status': 'collection', // Default trade status
-        'status': 'In Collection', // Default status
+        'notes': null,
+        'quantity': 1,
+        'trade_status': 'collection',
+        'status': 'In Collection',
         'origin': catalogPin.origin,
-        'release_date': catalogPin.releaseDate, // Assumes YYYY-MM-DD string or null
+        'release_date': catalogPin.releaseDate,
         'edition_size': catalogPin.editionSize,
         'tags': catalogPin.tags,
-        'catalog_pin_ref_id': int.tryParse(catalogPin.id), // Link to all_pins_catalog.id (which is bigint)
-        'catalog_series_name': catalogPin.seriesNameFromSource, // Store the original set name from catalog
-        'set_id': userSetIdForPinRecord, // Link to user's 'sets' table ID (bigint)
+        'catalog_pin_ref_id': int.tryParse(catalogPin.id),
+        'catalog_series_name': catalogPin.seriesNameFromSource,
+        'set_id': userSetIdForPinRecord,
       };
 
       print("Data to be inserted into 'pins' table (before removing nulls): $insertPinData");
-      // Remove keys with null values to avoid inserting explicit nulls if not desired by DB schema defaults
       insertPinData.removeWhere((key, value) => value == null);
       print("Data for 'pins' table after removing nulls: $insertPinData");
 
@@ -394,9 +434,9 @@ class _PinCatalogPageState extends State<PinCatalogPage> {
 
       if (mounted) {
         setState(() {
-          _ownedCatalogPinIds.add(catalogPin.id); // Add the string ID of the catalog pin
+          _ownedCatalogPinIds.add(catalogPin.id);
         });
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("'${catalogPin.name}' added to your collection!")));
+        _showSnackBar(context, "'${catalogPin.name}' added to your collection!");
       }
     } catch (e) {
       print("Error adding pin to collection or handling set: $e");
@@ -404,25 +444,34 @@ class _PinCatalogPageState extends State<PinCatalogPage> {
           print("PostgrestException details: code=${e.code}, message=${e.message}, details=${e.details}, hint=${e.hint}");
       }
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Failed to add pin: ${e.toString()}"), backgroundColor: Colors.red));
+        _showSnackBar(context, "Failed to add pin: ${e.toString()}", isError: true);
       }
     }
   }
 
+  // Custom SnackBar function to avoid direct ScaffoldMessenger calls repeatedly
+  void _showSnackBar(BuildContext context, String message, {bool isError = false}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: isError ? Colors.red : null,
+      ),
+    );
+  }
+
   void _showFilters() {
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Filter functionality coming soon!")));
+    _showSnackBar(context, "Filter functionality coming soon!");
   }
 
   void _navigateToWishlist() {
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Wishlist page coming soon!")));
+    _showSnackBar(context, "Wishlist page coming soon!");
     // Example: Navigator.push(context, MaterialPageRoute(builder: (context) => MyWishlistPage()));
   }
 
   void _navigateToMarketplaceForPin(CatalogPin pin) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Marketplace action for '${pin.name}' coming soon!")));
+    _showSnackBar(context, "Marketplace action for '${pin.name}' coming soon!");
     // Example: Navigator.push(context, MaterialPageRoute(builder: (context) => MarketplacePage(pinId: pin.id)));
   }
-
 
   @override
   Widget build(BuildContext context) {
@@ -449,6 +498,11 @@ class _PinCatalogPageState extends State<PinCatalogPage> {
                 _isSearching = !_isSearching;
                 if (!_isSearching) {
                   _searchController.clear();
+                  // When closing search, trigger a refresh to show all pins on the first page
+                  _currentPage = 0;
+                  _catalogPins.clear();
+                  _hasMorePins = true;
+                  _fetchCatalogPins();
                 }
               });
             },
@@ -474,15 +528,24 @@ class _PinCatalogPageState extends State<PinCatalogPage> {
               onPressed: (index) {
                 setState(() {
                   _viewMode = index == 0 ? CatalogViewMode.pins : CatalogViewMode.sets;
-                    _searchController.clear();
-                  _fetchData();
+                  _searchController.clear(); // Clear search on view mode switch
+                  _isLoading = true; // Show loading when switching view
+                  _fetchData(); // Refetch data for the new view mode
                 });
               },
               borderRadius: BorderRadius.circular(8.0),
-              constraints: BoxConstraints(minHeight: 38, minWidth: (MediaQuery.of(context).size.width - 48) / 2), // Adjusted for padding
-              children: const <Widget>[
-                Padding(padding: EdgeInsets.symmetric(horizontal: 16.0), child: Text("All Pins")),
-                Padding(padding: EdgeInsets.symmetric(horizontal: 16.0), child: Text("Sets")),
+              // Use Expanded to make buttons fill available width, or a flexible layout.
+              // Here, I'm adjusting minWidth using media query, but let's try a more flexible approach.
+              // Removed fixed constraints for better responsiveness on smaller screens.
+              children: <Widget>[
+                SizedBox(
+                  width: (MediaQuery.of(context).size.width / 2) - 16, // Half width minus padding
+                  child: const Center(child: Text("All Pins")),
+                ),
+                SizedBox(
+                  width: (MediaQuery.of(context).size.width / 2) - 16, // Half width minus padding
+                  child: const Center(child: Text("Sets")),
+                ),
               ],
             ),
           ),
@@ -493,7 +556,7 @@ class _PinCatalogPageState extends State<PinCatalogPage> {
   }
 
   Widget _buildContentView() {
-    if (_isLoading) {
+    if (_isLoading && _catalogPins.isEmpty && _catalogSets.isEmpty) {
       return const Center(child: CircularProgressIndicator());
     }
     if (_error != null) {
@@ -501,7 +564,7 @@ class _PinCatalogPageState extends State<PinCatalogPage> {
     }
 
     if (_viewMode == CatalogViewMode.pins) {
-      final pinsToDisplay = _filteredCatalogPins;
+      final pinsToDisplay = _catalogPins; // Now _catalogPins directly holds the filtered/paginated data
       if (pinsToDisplay.isEmpty) {
         return Center(child: Text(_searchController.text.isEmpty ? "No pins found in the catalog." : "No pins match your search."));
       }
@@ -511,13 +574,24 @@ class _PinCatalogPageState extends State<PinCatalogPage> {
           crossAxisCount: 3,
           crossAxisSpacing: 6.0,
           mainAxisSpacing: 6.0,
-          childAspectRatio: 0.62, // Adjust this ratio to fit your content better
+          childAspectRatio: 0.65, // Adjusted slightly to allow more vertical space
         ),
-        itemCount: pinsToDisplay.length,
+        itemCount: pinsToDisplay.length + (_hasMorePins ? 1 : 0), // Add one for the "Load More" button
         itemBuilder: (context, index) {
+          if (index == pinsToDisplay.length) {
+            // This is the "Load More" button
+            return Center(
+              child: _isLoading
+                  ? const CircularProgressIndicator()
+                  : ElevatedButton(
+                      onPressed: _hasMorePins ? _loadMorePins : null,
+                      child: const Text("Load More"),
+                    ),
+            );
+          }
           final pin = pinsToDisplay[index];
           final bool isWishlisted = _wishlistedPinIds.contains(pin.id);
-          final bool isOwned = _ownedCatalogPinIds.contains(pin.id); // Check against string ID
+          final bool isOwned = _ownedCatalogPinIds.contains(pin.id);
           return _buildPinCard(pin, isWishlisted, isOwned);
         },
       );
@@ -532,14 +606,13 @@ class _PinCatalogPageState extends State<PinCatalogPage> {
           return ListTile(
             contentPadding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
             leading: set.imageUrl != null && set.imageUrl!.isNotEmpty
-              ? Image.network(set.imageUrl!, width: 50, height: 50, fit: BoxFit.cover,
-                  errorBuilder: (context, error, stackTrace) => const Icon(Icons.broken_image, size: 40))
-              : const Icon(Icons.collections_bookmark, size: 40),
+                ? Image.network(set.imageUrl!, width: 50, height: 50, fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) => const Icon(Icons.broken_image, size: 40))
+                : const Icon(Icons.collections_bookmark, size: 40),
             title: Text(set.name, style: const TextStyle(fontWeight: FontWeight.w600)),
             subtitle: Text(set.description ?? "No description", maxLines: 2, overflow: TextOverflow.ellipsis),
             onTap: () {
-              // TODO: Implement navigation or action for tapping a catalog set
-              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Tapped on catalog set: ${set.name}")));
+              _showSnackBar(context, "Tapped on catalog set: ${set.name}");
             },
           );
         },
@@ -551,12 +624,10 @@ class _PinCatalogPageState extends State<PinCatalogPage> {
     String year = "";
     if (pin.releaseDate != null && pin.releaseDate!.isNotEmpty) {
       try {
-        // Assuming pin.releaseDate is in 'YYYY-MM-DD' format
         final date = DateTime.parse(pin.releaseDate!);
         year = date.year.toString();
       } catch (e) {
         print("Error parsing release date for pin ${pin.name}: ${pin.releaseDate}, Error: $e");
-        // year remains ""
       }
     }
     final theme = Theme.of(context);
@@ -570,42 +641,44 @@ class _PinCatalogPageState extends State<PinCatalogPage> {
         children: [
           Container( // Header for action buttons
             color: Colors.grey[200],
-            padding: const EdgeInsets.symmetric(horizontal: 2.0, vertical: 2.0),
+            // Reduced horizontal and vertical padding for tighter fit
+            padding: const EdgeInsets.symmetric(horizontal: 0.0, vertical: 0.0),
             child: Row(
-              mainAxisAlignment: MainAxisAlignment.end, // Align buttons to the right
+              mainAxisAlignment: MainAxisAlignment.end,
               children: [
+                // Adjusted iconSize and padding for all buttons
                 IconButton(
                   icon: Icon(
                     isWishlisted ? Icons.favorite : Icons.favorite_border,
                     color: isWishlisted ? Colors.red.shade400 : Colors.grey[700],
                   ),
-                  iconSize: 22,
-                  padding: const EdgeInsets.all(4),
-                  constraints: const BoxConstraints(),
+                  iconSize: 20, // Slightly smaller icon size
+                  padding: const EdgeInsets.all(2), // Reduced padding
+                  constraints: const BoxConstraints(), // No default constraints
                   tooltip: isWishlisted ? "Remove from Wishlist" : "Add to Wishlist",
                   onPressed: () => _toggleWishlist(pin),
                 ),
-                const SizedBox(width: 4),
+                const SizedBox(width: 2), // Reduced spacing between buttons
                 IconButton(
                   icon: Icon(
                     isOwned ? Icons.library_add_check : Icons.library_add_outlined,
                     color: isOwned ? theme.colorScheme.primary : Colors.grey[700],
                   ),
-                  iconSize: 22,
-                  padding: const EdgeInsets.all(4),
-                  constraints: const BoxConstraints(),
+                  iconSize: 20, // Slightly smaller icon size
+                  padding: const EdgeInsets.all(2), // Reduced padding
+                  constraints: const BoxConstraints(), // No default constraints
                   tooltip: isOwned ? "In Your Collection" : "Add to My Collection",
-                  onPressed: isOwned ? null : () => _addPinToMyCollection(pin), // Disable if owned
+                  onPressed: isOwned ? null : () => _addPinToMyCollection(pin),
                 ),
-                  const SizedBox(width: 4),
+                const SizedBox(width: 2), // Reduced spacing between buttons
                 IconButton(
                   icon: Icon(
                     Icons.storefront_outlined,
                     color: Colors.grey[700],
                   ),
-                  iconSize: 22,
-                  padding: const EdgeInsets.all(4),
-                  constraints: const BoxConstraints(),
+                  iconSize: 20, // Slightly smaller icon size
+                  padding: const EdgeInsets.all(2), // Reduced padding
+                  constraints: const BoxConstraints(), // No default constraints
                   tooltip: "Find on Marketplace",
                   onPressed: () => _navigateToMarketplaceForPin(pin),
                 ),
@@ -613,11 +686,11 @@ class _PinCatalogPageState extends State<PinCatalogPage> {
             ),
           ),
           Expanded( // For the image
-            flex: 5, // Give more space to image
+            flex: 5,
             child: (pin.imageUrl.isNotEmpty && pin.imageUrl != 'https://placehold.co/300x300/E6E6FA/333333?text=No+Image')
                 ? Image.network(
                     pin.imageUrl,
-                    fit: BoxFit.contain, // Use contain to see the whole pin
+                    fit: BoxFit.contain,
                     loadingBuilder: (context, child, loadingProgress) {
                       if (loadingProgress == null) return child;
                       return const Center(child: CircularProgressIndicator(strokeWidth: 1.5));
@@ -655,7 +728,7 @@ class _PinCatalogPageState extends State<PinCatalogPage> {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 1.0),
               child: Text(
-                "Set: ${pin.customSetName!}", // This might be an alternative set name field
+                "Set: ${pin.customSetName!}",
                 textAlign: TextAlign.center,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
@@ -684,8 +757,8 @@ String formatTimeAgo(DateTime dateTime) {
   final difference = now.difference(dateTime);
   if (difference.inSeconds < 5) return 'just now';
   if (difference.inMinutes < 1) return '${difference.inSeconds}s ago';
-  if (difference.inHours < 1) return '${difference.inMinutes}m ago';
+  if (difference.inHours < 1) return '${difference.inHours}h ago';
   if (difference.inHours < 24) return '${difference.inHours}h ago';
   if (difference.inDays < 7) return '${difference.inDays}d ago';
-  return DateFormat('MMM d, yyyy').format(dateTime); // Corrected DateFormat pattern
+  return DateFormat('MMM d,yyyy').format(dateTime);
 }
