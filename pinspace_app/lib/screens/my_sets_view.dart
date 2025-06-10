@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart'; // For date formatting in the card
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'set_details_page.dart'; // Import the new details page
+import 'dart:async'; // Required for Timer for debouncing
+
 
 final supabase = Supabase.instance.client;
 
@@ -28,9 +30,10 @@ class PinSet {
   final int id; // User's set ID from their 'sets' table. Will be -1 for the virtual "Uncategorized" set.
   final String name;
   final DateTime createdAt; // Will be DateTime.now() for "Uncategorized" set.
-  List<DisplayPinInSet> pinsToDisplay; 
-  int? originalCatalogSetId; 
+  List<DisplayPinInSet> pinsToDisplay;
+  int? originalCatalogSetId;
   bool isVirtual; // Flag to identify the "Uncategorized Pins" set
+  bool isComplete; // New: True if all pins in a catalog-linked set are owned
 
   PinSet({
     required this.id,
@@ -39,6 +42,7 @@ class PinSet {
     this.pinsToDisplay = const [],
     this.originalCatalogSetId,
     this.isVirtual = false,
+    this.isComplete = false, // Initialize as false
   });
 
   factory PinSet.fromMap(Map<String, dynamic> map) {
@@ -46,7 +50,7 @@ class PinSet {
       id: map['id'] as int,
       name: map['name'] as String,
       createdAt: DateTime.parse(map['created_at'] as String),
-      pinsToDisplay: [], 
+      pinsToDisplay: [],
     );
   }
 }
@@ -59,15 +63,38 @@ class MySetsView extends StatefulWidget {
   State<MySetsView> createState() => _MySetsViewState();
 }
 
-class _MySetsViewState extends State<MySetsView> {
+class _MySetsViewState extends State<MySetsView> with SingleTickerProviderStateMixin { // Added SingleTickerProviderStateMixin
   List<PinSet> _mySets = [];
   bool _isLoadingSets = true;
   String? _setsError;
 
+  // Animation variables for the fade-in effect
+  late AnimationController _animationController;
+  late Animation<double> _fadeAnimation; // For fade in effect
+
   @override
   void initState() {
     super.initState();
+    // Initialize AnimationController for the fade effect
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800), // Duration of the fade
+    );
+
+    // Define the fade animation (from 0.0 to 1.0)
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(CurvedAnimation(
+      parent: _animationController,
+      curve: Curves.easeIn,
+    ));
+
+
     _fetchMySetsAndTheirPins();
+  }
+
+  @override
+  void dispose() {
+    _animationController.dispose(); // Dispose the animation controller
+    super.dispose();
   }
 
   Future<void> _fetchMySetsAndTheirPins() async {
@@ -155,6 +182,10 @@ class _MySetsViewState extends State<MySetsView> {
               isOwned: ownedCatalogPinIdsForThisUserSet.contains(catalogPinIdFromDb),
             ));
           }
+          // Determine if the set is complete
+          userSet.isComplete = allCatalogPinsData.isNotEmpty &&
+              pinsForThisSetDisplay.where((p) => p.isOwned).length == allCatalogPinsData.length;
+
           // Sort pins: owned first, then by name (or ID if names are not unique enough)
           pinsForThisSetDisplay.sort((a, b) {
             if (a.isOwned && !b.isOwned) return -1; // a (owned) comes before b (not owned)
@@ -180,20 +211,23 @@ class _MySetsViewState extends State<MySetsView> {
                   displayId: displayId,
                   name: ownedPinMap['name'] as String,
                   imageUrl: ownedPinMap['image_url'] as String? ?? 'https://placehold.co/70x70/E6E6FA/333333?text=N/A',
-                  isOwned: true, 
+                  isOwned: true,
               ));
           }
+           // Custom sets are not considered for the "Set Complete" achievement in the same way catalog sets are.
+           // You could define a rule, e.g., complete if it has > 0 pins. For now, we'll leave it as false.
+          userSet.isComplete = false;
         }
         userSet.pinsToDisplay = pinsForThisSetDisplay;
         setsWithPinDetails.add(userSet);
       }
-      
+
       // 4. Fetch uncategorized pins and add as a virtual set
       final uncategorizedPinsResponse = await supabase
           .from('pins')
           .select('id, name, image_url, catalog_pin_ref_id')
           .eq('user_id', userId)
-          .filter('set_id', 'is', null) 
+          .filter('set_id', 'is', null)
           .order('name', ascending: true); // Order uncategorized pins by name
 
       List<DisplayPinInSet> uncategorizedDisplayPins = [];
@@ -215,6 +249,7 @@ class _MySetsViewState extends State<MySetsView> {
               createdAt: DateTime.now(), // Not relevant but required by model
               pinsToDisplay: uncategorizedDisplayPins,
               isVirtual: true,
+              isComplete: false, // Uncategorized sets can't be "complete"
           ));
       }
 
@@ -224,6 +259,11 @@ class _MySetsViewState extends State<MySetsView> {
           _mySets = setsWithPinDetails;
           _isLoadingSets = false;
         });
+
+        // Trigger animation if any set is complete after data fetch
+        if (_mySets.any((set) => set.isComplete)) {
+          _animationController.forward(from: 0.0); // Play animation from the beginning
+        }
       }
     } catch (e) {
       print("Error fetching sets and their pins: $e");
@@ -270,7 +310,7 @@ class _MySetsViewState extends State<MySetsView> {
     if (confirm == true) {
       try {
         await supabase.from('sets').delete().match({'id': setToDelete.id, 'user_id': supabase.auth.currentUser!.id});
-        
+
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('Set "${setToDelete.name}" deleted successfully.')),
@@ -291,11 +331,11 @@ class _MySetsViewState extends State<MySetsView> {
 
   Widget _buildPinsDisplaySection(PinSet set, ThemeData theme) {
     if (set.pinsToDisplay.isEmpty) {
-      String message = set.isVirtual 
-          ? "No uncategorized pins found." 
+      String message = set.isVirtual
+          ? "No uncategorized pins found."
           : (set.originalCatalogSetId != null
-            ? "No pins found in the main catalog for this set."
-            : "No pins added to this custom set yet.");
+              ? "No pins found in the main catalog for this set."
+              : "No pins added to this custom set yet.");
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 8.0),
         child: Text(message, style: TextStyle(fontStyle: FontStyle.italic, color: Colors.grey[700])),
@@ -347,7 +387,7 @@ class _MySetsViewState extends State<MySetsView> {
               return Padding(
                 padding: const EdgeInsets.only(right: 10.0),
                 child: Tooltip(
-                  message: set.originalCatalogSetId != null 
+                  message: set.originalCatalogSetId != null
                            ? "${pinDisplay.name}${pinDisplay.isOwned ? ' (Owned)' : ' (Missing)'}"
                            : pinDisplay.name,
                   child: Container(
@@ -355,14 +395,14 @@ class _MySetsViewState extends State<MySetsView> {
                     decoration: BoxDecoration(
                       border: Border.all(
                         color: (set.originalCatalogSetId != null && !pinDisplay.isOwned)
-                               ? Colors.red.withOpacity(0.7)
-                               : Colors.transparent,
+                                ? Colors.red.withOpacity(0.7)
+                                : Colors.transparent,
                         width: 1.5,
                       ),
                       borderRadius: BorderRadius.circular(6.0),
-                      color: (set.originalCatalogSetId != null && pinDisplay.isOwned) 
-                             ? Colors.green.withOpacity(0.1) 
-                             : Colors.transparent,
+                      color: (set.originalCatalogSetId != null && pinDisplay.isOwned)
+                                ? Colors.green.withOpacity(0.1)
+                                : Colors.transparent,
                     ),
                     child: imageWidget,
                   ),
@@ -375,60 +415,115 @@ class _MySetsViewState extends State<MySetsView> {
     );
   }
 
-
+  /// START OF CHANGES ///
   Widget _buildSetCard(PinSet set) {
     final theme = Theme.of(context);
-    return GestureDetector(
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => SetDetailsPage(set: set, isUncategorizedSet: set.isVirtual),
-          ),
-        );
-      },
-      child: Card(
-        elevation: 2.0,
-        margin: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
-        clipBehavior: Clip.antiAlias,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10.0)),
-        child: Padding(
-          padding: const EdgeInsets.all(10.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Expanded(
-                    child: Text(
-                      set.name,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold, 
-                        color: const Color(0xFF3d4895),
-                        fontSize: 16, 
+    final int ownedPins = set.pinsToDisplay.where((p) => p.isOwned).length;
+    final int totalPins = set.pinsToDisplay.length;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
+      child: GestureDetector(
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => SetDetailsPage(set: set, isUncategorizedSet: set.isVirtual),
+            ),
+          );
+        },
+        child: Card(
+          elevation: 2.0,
+          clipBehavior: Clip.antiAlias,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10.0)),
+          child: Padding(
+            padding: const EdgeInsets.all(12.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // --- Set Title ---
+                    Expanded(
+                      child: Text(
+                        set.name,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.grey[850], // Dark grey for the title
+                          fontSize: 16,
+                        ),
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      overflow: TextOverflow.ellipsis,
                     ),
-                  ),
-                  if (!set.isVirtual && set.originalCatalogSetId == null) 
-                    IconButton(
-                      icon: Icon(Icons.delete_outline, color: Colors.red[400], size: 20),
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
-                      tooltip: "Delete Set",
-                      onPressed: () => _deleteSet(set),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 6), 
-              _buildPinsDisplaySection(set, theme), 
-            ],
+                    // --- Delete Button ---
+                    if (!set.isVirtual && set.originalCatalogSetId == null)
+                      IconButton(
+                        icon: Icon(Icons.delete_outline, color: Colors.red[400], size: 22),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        tooltip: "Delete Set",
+                        onPressed: () => _deleteSet(set),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                // --- Progress indicator and Magical Completion Icon ---
+                Row(
+                  children: [
+                    // Magical "Set Complete" icon
+                    if (set.isComplete)
+                      FadeTransition(
+                        opacity: _fadeAnimation,
+                        child: Tooltip(
+                          message: 'Set Complete!',
+                          child: Container(
+                            margin: const EdgeInsets.only(right: 8.0),
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.green.withOpacity(0.6), // Green shadow
+                                  blurRadius: 8.0,
+                                  spreadRadius: 2.0,
+                                ),
+                              ],
+                            ),
+                            child: Icon(
+                              Icons.auto_awesome, // "Magical" sparkle icon
+                              color: Colors.white,
+                              size: 16, // Icon size reduced
+                            ),
+                          ),
+                        ),
+                      ),
+                    // Show progress for catalog sets, pin count for others
+                    if (set.originalCatalogSetId != null)
+                      Text(
+                        '$ownedPins/$totalPins Collected',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: set.isComplete ? Colors.green[700] : Colors.grey[600],
+                          fontWeight: set.isComplete ? FontWeight.bold : FontWeight.normal,
+                        ),
+                      )
+                    else
+                       Text(
+                        '$totalPins ${totalPins == 1 ? "Pin" : "Pins"}',
+                         style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey[600]),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                _buildPinsDisplaySection(set, theme),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
+  /// END OF CHANGES ///
 
   @override
   Widget build(BuildContext context) {
@@ -449,9 +544,9 @@ class _MySetsViewState extends State<MySetsView> {
       ));
     }
     return RefreshIndicator(
-      onRefresh: _fetchMySetsAndTheirPins, 
+      onRefresh: _fetchMySetsAndTheirPins,
       child: ListView.builder(
-        padding: const EdgeInsets.only(top: 8.0, bottom: 16.0), 
+        padding: const EdgeInsets.only(top: 8.0, bottom: 16.0),
         itemCount: _mySets.length,
         itemBuilder: (context, index) {
           return _buildSetCard(_mySets[index]);
@@ -459,4 +554,16 @@ class _MySetsViewState extends State<MySetsView> {
       ),
     );
   }
+}
+
+// Helper function for formatting time (if needed elsewhere, otherwise can be local or removed)
+String formatTimeAgo(DateTime dateTime) {
+  final now = DateTime.now();
+  final difference = now.difference(dateTime);
+  if (difference.inSeconds < 5) return 'just now';
+  if (difference.inMinutes < 1) return '${difference.inSeconds}s ago';
+  if (difference.inHours < 1) return '${difference.inHours}h ago';
+  if (difference.inHours < 24) return '${difference.inHours}h ago';
+  if (difference.inDays < 7) return '${difference.inDays}d ago';
+  return DateFormat('MMM d,yyyy').format(dateTime);
 }
