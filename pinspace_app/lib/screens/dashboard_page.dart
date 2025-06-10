@@ -14,7 +14,7 @@ import 'my_pins_page.dart' hide Pin, PinStatus; // Hide if it also defines Pin t
 import 'scanner_page.dart';
 import 'marketplace_page.dart';
 import 'main_app_shell.dart';
-import 'pin_catalog_page.dart'; // ✨ IMPORTED for navigation
+import 'pin_catalog_page.dart';
 
 final supabase = Supabase.instance.client;
 
@@ -46,6 +46,26 @@ class CatalogPin {
   }
 }
 
+class CatalogSet {
+  final int id;
+  final String name;
+  final List<String> pinImageUrls;
+
+  CatalogSet({required this.id, required this.name, required this.pinImageUrls});
+
+  factory CatalogSet.fromMap(Map<String, dynamic> map) {
+    // Safely parse the list of image URLs from the function's result
+    final imageUrlsData = map['pin_image_urls'] as List<dynamic>?;
+    final imageUrls = imageUrlsData?.map((item) => item.toString()).toList() ?? [];
+
+    return CatalogSet(
+      id: map['id'] as int,
+      name: map['name'] as String,
+      pinImageUrls: imageUrls,
+    );
+  }
+}
+
 
 class DashboardPage extends StatefulWidget {
   final void Function(int)? onNavigateRequest;
@@ -65,11 +85,12 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
   int _mySetCount = 0; 
   int _forTradeCount = 0;
   int _wishlistCount = 0;
+  int _myTrophiesCount = 0;
   bool _isLoadingStats = true;
 
-  List<CatalogPin> _newestPins = [];
-  bool _isLoadingNewestPins = true;
-  String? _newestPinsError;
+  List<CatalogSet> _newestSets = [];
+  bool _isLoadingNewestSets = true;
+  String? _newestSetsError;
 
   late AnimationController _greetingAnimationController;
   late Animation<double> _greetingFadeAnimation;
@@ -97,7 +118,7 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
 
   Future<void> _fetchAllDashboardData() async {
     await _fetchUserProfileAndStats();
-    await _fetchNewestPins(); 
+    await _fetchNewestSets(); 
   }
 
   Future<void> _fetchUserProfileAndStats() async {
@@ -149,15 +170,13 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
           .eq('user_id', user.id)
           .count(CountOption.exact);
       _myCollectionCount = pinCountResponse.count ?? 0;
-      print('Fetched pin count for user ${user.id}: $_myCollectionCount');
-
+      
       final setCountResponse = await supabase
           .from('sets') 
           .select('id') 
           .eq('user_id', user.id)
           .count(CountOption.exact);
       _mySetCount = setCountResponse.count ?? 0;
-      print('Fetched set count for user ${user.id}: $_mySetCount');
       
       final pinsForTradeResponse = await supabase
           .from('pins')
@@ -193,6 +212,20 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
       } catch (e) {
         print("Error fetching wishlist count: $e");
       }
+      
+      _myTrophiesCount = 0;
+      try {
+        final trophiesResponse = await supabase
+            .from('trophies')
+            .select()
+            .eq('user_id', user.id)
+            .count(CountOption.exact);
+        if(mounted) {
+          _myTrophiesCount = trophiesResponse.count ?? 0;
+        }
+      } catch (e) {
+        print("Error fetching trophies count: $e");
+      }
 
       if (mounted) {
         setState(() => _isLoadingStats = false);
@@ -205,38 +238,38 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
           _isLoadingStats = false;
           _profileError = "Failed to load dashboard data. ${e.toString()}";
         });
-         _greetingAnimationController.forward(); 
+          _greetingAnimationController.forward(); 
       }
     }
   }
 
-  Future<void> _fetchNewestPins() async {
+  // ✨ UPDATED: This function now calls the Supabase RPC function from Step 1
+  Future<void> _fetchNewestSets() async {
     if (!mounted) return;
     setState(() {
-      _isLoadingNewestPins = true;
-      _newestPinsError = null;
+      _isLoadingNewestSets = true;
+      _newestSetsError = null;
     });
 
     try {
+      // Instead of .from().select(), we now call our custom function
       final response = await supabase
-          .from('all_pins_catalog')
-          .select('id, name, image_url')
-          .order('created_at', ascending: false)
-          .limit(5); 
+          .rpc('get_newest_sets_with_pin_images');
 
       if (!mounted) return;
 
       final List<dynamic> data = response as List<dynamic>;
-      _newestPins = data.map((map) => CatalogPin.fromMap(map as Map<String, dynamic>)).toList();
+      _newestSets = data.map((map) => CatalogSet.fromMap(map as Map<String, dynamic>)).toList();
       
-      setState(() => _isLoadingNewestPins = false);
+      setState(() => _isLoadingNewestSets = false);
 
-    } catch (e) {
-      print('Error fetching newest pins: $e');
+    } catch (e, stackTrace) {
+      print('Error fetching newest sets: $e');
+      print('Stack trace: $stackTrace');
       if (mounted) {
         setState(() {
-          _isLoadingNewestPins = false;
-          _newestPinsError = "Failed to load newest pins.";
+          _isLoadingNewestSets = false;
+          _newestSetsError = "Failed to load newest sets.";
         });
       }
     }
@@ -283,16 +316,15 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
                       _buildQuickActionsGrid(context, theme),
                       const SizedBox(height: 30.0),
 
-                      // ✨ UPDATED: Section header for Newest Pins
                       _buildSectionHeader(
-                        "Newest Pins in Catalog", 
+                        "Newest Sets in Catalog", 
                         theme,
                         actionButton: TextButton(
                           onPressed: () {
                             Navigator.push(context, MaterialPageRoute(builder: (context) => const PinCatalogPage()));
                           },
                           child: Text(
-                            "View Catalog",
+                            "View All Sets",
                             style: TextStyle(
                               fontFamily: kMagicalFont,
                               fontWeight: FontWeight.w600,
@@ -303,7 +335,7 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
                         ),
                       ), 
                       const SizedBox(height: 16.0),
-                      _buildNewestPinsSection(theme), 
+                      _buildNewestSetsSection(theme), 
                       const SizedBox(height: 30.0),
 
                       _buildSectionHeader("Community Buzz", theme),
@@ -320,7 +352,6 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
     );
   }
 
-  // ✨ UPDATED: _buildSectionHeader to optionally include an action button
   Widget _buildSectionHeader(String title, ThemeData theme, {Widget? actionButton}) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -405,7 +436,7 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
       mainAxisSpacing: 16.0,
       crossAxisSpacing: 16.0,
       childAspectRatio: 2.3, 
-      children: List.generate(3, (index) => Shimmer.fromColors(
+      children: List.generate(4, (index) => Shimmer.fromColors(
         baseColor: Colors.grey.shade300, 
         highlightColor: Colors.grey.shade100, 
         child: Card(
@@ -422,12 +453,12 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
     );
   }
 
-
   Widget _buildStatsGrid(BuildContext context, ThemeData theme) { 
     final statCardColors = [
-      Colors.pink.shade300, 
-      Colors.lightBlue.shade300, 
-      kSecondaryAppColor, 
+      Colors.green.shade400,
+      Colors.lightBlue.shade300,
+      Colors.red.shade400,
+      kSecondaryAppColor,
     ];
 
     String myCollectionValue = "$_myCollectionCount Pins | $_mySetCount Sets";
@@ -445,6 +476,7 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
       ),
       _StatCard(title: "For Trade", value: _forTradeCount.toString(), icon: Icons.swap_horiz_rounded, cardAccentColor: statCardColors[1], iconThemeColor: statCardColors[1]),
       _StatCard(title: "Wishlist", value: _wishlistCount.toString(), icon: Icons.favorite_rounded, cardAccentColor: statCardColors[2], iconThemeColor: statCardColors[2]),
+      _StatCard(title: "My Trophies", value: _myTrophiesCount.toString(), icon: Icons.emoji_events_rounded, cardAccentColor: statCardColors[3], iconThemeColor: statCardColors[3]),
     ];
 
     return AnimationLimiter(
@@ -476,7 +508,7 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
   }
 
   Widget _buildQuickActionsGrid(BuildContext context, ThemeData theme) {
-     final actionItems = [
+    final actionItems = [
       _ActionCardData(
         title: "Add New Pin",
         icon: Icons.add_photo_alternate_rounded, 
@@ -539,40 +571,40 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
     );
   }
 
-  Widget _buildNewestPinsSection(ThemeData theme) {
-    if (_isLoadingNewestPins) {
-      return _buildPinsShimmer();
+  Widget _buildNewestSetsSection(ThemeData theme) {
+    if (_isLoadingNewestSets) {
+      return _buildSetsShimmer();
     }
 
-    if (_newestPinsError != null) {
+    if (_newestSetsError != null) {
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 20.0),
-        child: Center(child: Text(_newestPinsError!, style: TextStyle(fontFamily: kMagicalFont, color: Colors.red.shade700))),
+        child: Center(child: Text(_newestSetsError!, style: TextStyle(fontFamily: kMagicalFont, color: Colors.red.shade700))),
       );
     }
 
-    if (_newestPins.isEmpty) {
+    if (_newestSets.isEmpty) {
       return const Padding(
         padding: EdgeInsets.symmetric(vertical: 20.0),
-        child: Center(child: Text("No new pins in the catalog yet!", style: TextStyle(fontFamily: kMagicalFont, color: Colors.grey))),
+        child: Center(child: Text("No new sets in the catalog yet!", style: TextStyle(fontFamily: kMagicalFont, color: Colors.grey))),
       );
     }
 
     return SizedBox(
-      height: 200, 
+      height: 220, // Increased height to accommodate dots and wrapped text
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
-        itemCount: _newestPins.length,
+        itemCount: _newestSets.length,
         itemBuilder: (context, index) {
-          final pinData = _newestPins[index];
+          final setData = _newestSets[index];
           return AnimationConfiguration.staggeredList(
             position: index,
             duration: const Duration(milliseconds: 375),
             child: SlideAnimation(
               horizontalOffset: 50.0,
               child: FadeInAnimation(
-                child: _PinDisplayCard(
-                  pin: pinData, 
+                child: _SetDisplayCard(
+                  set: setData, 
                   borderColor: Colors.grey.shade300, 
                 ),
               ),
@@ -583,9 +615,9 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
     );
   }
 
-  Widget _buildPinsShimmer() {
+  Widget _buildSetsShimmer() {
     return SizedBox(
-      height: 200, 
+      height: 220, 
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
         itemCount: 3, 
@@ -594,8 +626,8 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
             baseColor: Colors.grey.shade300,
             highlightColor: Colors.grey.shade100,
             child: Container(
-              width: 140, 
-              height: 180, 
+              width: 150, 
+              height: 200, 
               margin: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
               decoration: BoxDecoration(
                 color: Colors.white,
@@ -614,7 +646,7 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
       _SocialActivityData(title: "Hot Pin Listed", description: "'DisneyDreamer' listed a 'Haunted Mansion Holiday 2023' pin.", icon: Icons.local_fire_department_rounded, color: kSubtleAccents[1]),
       _SocialActivityData(title: "Community Goal Reached", description: "We've hit 10,000 trades on PinSpace!", icon: Icons.celebration_rounded, color: kSubtleAccents[2]),
     ];
-     if (socialActivities.isEmpty) {
+    if (socialActivities.isEmpty) {
       return const Padding(
         padding: EdgeInsets.symmetric(vertical: 20.0),
         child: Center(child: Text("No community buzz right now.", style: TextStyle(fontFamily: kMagicalFont, color: Colors.grey))),
@@ -715,7 +747,7 @@ class _StatCard extends StatelessWidget {
                         style: theme.textTheme.titleSmall?.copyWith(
                           fontWeight: FontWeight.bold,
                           fontFamily: kMagicalFont,
-                          color: kMainAppColor, 
+                          color: cardAccentColor,
                         ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -732,8 +764,8 @@ class _StatCard extends StatelessWidget {
                     style: theme.textTheme.bodyLarge?.copyWith( 
                       fontWeight: FontWeight.bold,
                       fontFamily: kMagicalFont,
-                      color: cardAccentColor, 
-                       letterSpacing: -0.2, 
+                      color: Colors.grey.shade700,
+                      letterSpacing: -0.2, 
                     ),
                     maxLines: 2, 
                     textAlign: TextAlign.start,
@@ -803,109 +835,181 @@ class _ActionCard extends StatelessWidget {
   }
 }
 
+class _SetDisplayCard extends StatefulWidget {
+  final CatalogSet set;
+  final Color borderColor;
 
-class _PinDisplayCard extends StatelessWidget {
-  final CatalogPin pin;
-  final Color borderColor; 
+  const _SetDisplayCard({required this.set, required this.borderColor});
 
-  const _PinDisplayCard({required this.pin, required this.borderColor});
+  @override
+  State<_SetDisplayCard> createState() => _SetDisplayCardState();
+}
+
+class _SetDisplayCardState extends State<_SetDisplayCard> {
+  late final PageController _pageController;
+  int _currentPage = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _pageController = PageController();
+    _pageController.addListener(() {
+      if (_pageController.page?.round() != _currentPage) {
+        setState(() {
+          _currentPage = _pageController.page!.round();
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+  
+  // Helper to build the indicator dots
+  Widget _buildPageIndicator() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: List.generate(widget.set.pinImageUrls.length, (index) {
+        return Container(
+          width: 8.0,
+          height: 8.0,
+          margin: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 4.0),
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: _currentPage == index
+                ? kMainAppColor
+                : Colors.grey.shade400,
+          ),
+        );
+      }),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    Widget imageWidget;
-    const double imageHeight = 100.0; 
-    const double imageWidth = 120.0; 
+    const double imageHeight = 100.0;
+    const double imageWidth = 130.0;
 
+    Widget imageCarousel;
 
-    if (pin.imageUrl != null && pin.imageUrl!.isNotEmpty) {
-      imageWidget = Image.network(
-        pin.imageUrl!,
-        width: imageWidth,
-        height: imageHeight,
-        fit: BoxFit.contain, 
-        errorBuilder: (context, error, stackTrace) {
-          return Container(
-            width: imageWidth,
+    // Check if there are any images to display
+    if (widget.set.pinImageUrls.isNotEmpty) {
+      imageCarousel = Stack(
+        alignment: Alignment.center,
+        children: [
+          SizedBox(
             height: imageHeight,
-            decoration: BoxDecoration(
-              color: Colors.grey.shade200,
-              borderRadius: BorderRadius.circular(8.0),
-            ),
-            child: Icon(Icons.broken_image_rounded, size: 40, color: Colors.grey.shade400),
-          );
-        },
-        loadingBuilder: (BuildContext context, Widget child, ImageChunkEvent? loadingProgress) {
-          if (loadingProgress == null) return child;
-          return Container(
             width: imageWidth,
-            height: imageHeight,
-            decoration: BoxDecoration(
-              color: Colors.grey.shade200,
-              borderRadius: BorderRadius.circular(8.0),
+            child: PageView.builder(
+              controller: _pageController,
+              itemCount: widget.set.pinImageUrls.length,
+              itemBuilder: (context, index) {
+                final imageUrl = widget.set.pinImageUrls[index];
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                  child: Image.network(
+                    imageUrl,
+                    fit: BoxFit.contain,
+                    errorBuilder: (context, error, stackTrace) => Icon(Icons.broken_image_rounded, size: 40, color: Colors.grey.shade400),
+                    loadingBuilder: (BuildContext context, Widget child, ImageChunkEvent? loadingProgress) {
+                      if (loadingProgress == null) return child;
+                      return Center(
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.0,
+                          valueColor: const AlwaysStoppedAnimation<Color>(kMainAppColor),
+                          value: loadingProgress.expectedTotalBytes != null
+                              ? loadingProgress.cumulativeBytesLoaded / loadingProgress.expectedTotalBytes!
+                              : null,
+                        ),
+                      );
+                    },
+                  ),
+                );
+              },
             ),
-            child: Center(
-              child: CircularProgressIndicator(
-                strokeWidth: 2.0,
-                valueColor: AlwaysStoppedAnimation<Color>(kMainAppColor),
-                value: loadingProgress.expectedTotalBytes != null
-                    ? loadingProgress.cumulativeBytesLoaded / loadingProgress.expectedTotalBytes!
-                    : null,
+          ),
+          // Left Arrow
+          if (_currentPage > 0)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: IconButton(
+                icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.black54),
+                onPressed: () => _pageController.previousPage(
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeOut,
+                ),
               ),
             ),
-          );
-        },
+          // Right Arrow
+          if (_currentPage < widget.set.pinImageUrls.length - 1)
+            Align(
+              alignment: Alignment.centerRight,
+              child: IconButton(
+                icon: const Icon(Icons.arrow_forward_ios_rounded, color: Colors.black54),
+                onPressed: () => _pageController.nextPage(
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeOut,
+                ),
+              ),
+            ),
+        ],
       );
     } else {
-      imageWidget = Container(
+      // Fallback if there are no images for the set
+      imageCarousel = Container(
         width: imageWidth,
         height: imageHeight,
         decoration: BoxDecoration(
           color: Colors.grey.shade200,
           borderRadius: BorderRadius.circular(8.0),
         ),
-        child: Icon(Icons.push_pin_rounded, size: 40, color: Colors.grey.shade400),
+        child: Icon(Icons.collections_bookmark_rounded, size: 40, color: Colors.grey.shade400),
       );
     }
 
     return Container(
-      width: 140, 
-      margin: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0), 
+      width: 150,
+      margin: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12.0),
-        boxShadow: [ 
+        boxShadow: [
           BoxShadow(
-            color: Colors.grey.withOpacity(0.3), 
-            blurRadius: 8.0, 
-            spreadRadius: 1.0, 
-            offset: const Offset(2.0, 3.0), 
+            color: Colors.grey.withOpacity(0.3),
+            blurRadius: 8.0,
+            spreadRadius: 1.0,
+            offset: const Offset(2.0, 3.0),
           ),
         ],
-        border: Border.all(color: borderColor, width: 1.5) 
+        border: Border.all(color: widget.borderColor, width: 1.5),
       ),
       child: Padding(
         padding: const EdgeInsets.all(10.0),
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.start, 
+          mainAxisAlignment: MainAxisAlignment.start,
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            ClipRRect( 
-                borderRadius: BorderRadius.circular(8.0),
-                child: imageWidget,
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8.0),
+              child: imageCarousel,
             ),
-            const SizedBox(height: 8),
-            Expanded( 
+            if (widget.set.pinImageUrls.length > 1) _buildPageIndicator(),
+            const SizedBox(height: 4),
+            // ✨ UPDATED: Text is now in a Flexible widget to allow wrapping without overflow
+            Flexible(
               child: Text(
-                pin.name,
+                widget.set.name,
                 style: TextStyle(
                   fontFamily: kMagicalFont,
                   fontWeight: FontWeight.w600,
-                  color: kMainAppColor.withOpacity(0.9), 
-                  fontSize: 13, 
+                  color: kMainAppColor.withOpacity(0.9),
+                  fontSize: 13,
                 ),
                 textAlign: TextAlign.center,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
+                // Removed maxLines and overflow to allow text to wrap
               ),
             ),
           ],
@@ -971,4 +1075,3 @@ class _SocialActivityCard extends StatelessWidget {
     );
   }
 }
-
