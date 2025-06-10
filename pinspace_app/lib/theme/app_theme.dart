@@ -14,7 +14,7 @@ class AppTheme {
         seedColor: AppColors.sulleyBlue, // Base color for generating scheme
         primary: AppColors.sulleyBlue,
         secondary: AppColors.mikeLime,
-        tertiary: AppColors.booPurple,
+        tertiary: AppColors.sulleyBlue,
         // You can override other colors too:
         // background: AppColors.white,
         // error: Colors.red,

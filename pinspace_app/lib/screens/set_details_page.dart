@@ -1,14 +1,13 @@
 // lib/screens/set_details_page.dart
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'my_sets_view.dart'; // To use DisplayPinInSet and PinSet (or move models to a common file)
-// You might also need your main Pin model from my_pins_view.dart if you show full pin details here
+import 'my_sets_view.dart'; // To use DisplayPinInSet and PinSet
 
 final supabase = Supabase.instance.client;
 
 class SetDetailsPage extends StatefulWidget {
-  final PinSet set; // The user's set object
-  final bool isUncategorizedSet; // Flag to indicate if this is the special "Uncategorized" set
+  final PinSet set;
+  final bool isUncategorizedSet;
 
   const SetDetailsPage({
     super.key,
@@ -20,99 +19,308 @@ class SetDetailsPage extends StatefulWidget {
   State<SetDetailsPage> createState() => _SetDetailsPageState();
 }
 
-class _SetDetailsPageState extends State<SetDetailsPage> {
-  List<DisplayPinInSet> _pinsInThisSet = [];
+class _SetDetailsPageState extends State<SetDetailsPage> with SingleTickerProviderStateMixin {
+  late List<DisplayPinInSet> _pinsInThisSet;
   bool _isLoading = true;
   String? _error;
+  late AnimationController _animationController;
+  late Animation<double> _fadeAnimation;
+  
+  String? _currentUserId;
+  Set<String> _wishlistedPinIds = {};
+
 
   @override
   void initState() {
     super.initState();
-    if (widget.isUncategorizedSet) {
-      _fetchUncategorizedPins();
-    } else {
-      // For regular sets, the pinsToDisplay should already be populated
-      // by MySetsView. If not, or if you want a fresh fetch:
-      _pinsInThisSet = List.from(widget.set.pinsToDisplay); // Use pre-fetched pins
-      _isLoading = false;
-      // Alternatively, you could re-fetch based on widget.set.id and widget.set.originalCatalogSetId
-      // if you want this page to be completely independent of the data passed from MySetsView.
-      // For simplicity now, we use the passed data.
+    _pinsInThisSet = List.from(widget.set.pinsToDisplay);
+    _isLoading = false;
+    _currentUserId = supabase.auth.currentUser?.id;
+
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    );
+
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _animationController, curve: Curves.easeIn),
+    );
+
+    if (widget.set.isComplete) {
+      _animationController.forward();
+    }
+    
+    if (_currentUserId != null) {
+      _fetchUserWishlist();
     }
   }
 
-  Future<void> _fetchUncategorizedPins() async {
-    if (supabase.auth.currentUser == null) {
-      if (mounted) setState(() => _error = "Please log in.");
-      _isLoading = false;
-      return;
-    }
-    final userId = supabase.auth.currentUser!.id;
-    setState(() {
-      _isLoading = true;
-      _error = null;
-    });
+  @override
+  void dispose() {
+    _animationController.dispose();
+    super.dispose();
+  }
+  
+  Future<void> _fetchUserWishlist() async {
+    if (_currentUserId == null || !mounted) return;
     try {
       final response = await supabase
-          .from('pins')
-          .select('id, name, image_url, catalog_pin_ref_id') // Fetch necessary fields
-          .eq('user_id', userId)
-          .filter('set_id', 'is', null); // Corrected: Pins with no set_id
+          .from('user_wishlist')
+          .select('pin_catalog_id')
+          .eq('user_id', _currentUserId!);
 
-      final List<DisplayPinInSet> uncategorizedPins = (response as List<dynamic>)
-          .map((data) {
-            final map = data as Map<String, dynamic>;
-            final String displayId = (map['catalog_pin_ref_id']?.toString()) ?? "custom_${map['id']}";
-            return DisplayPinInSet(
-              displayId: displayId,
-              name: map['name'] as String,
-              imageUrl: map['image_url'] as String? ?? 'https://placehold.co/100x100/E6E6FA/333333?text=N/A',
-              isOwned: true, // All pins here are owned by the user
-            );
-          })
-          .toList();
-      if (mounted) {
-        setState(() {
-          _pinsInThisSet = uncategorizedPins;
-          _isLoading = false;
-        });
-      }
+      if (!mounted) return;
+
+      final List<dynamic> data = response as List<dynamic>;
+      setState(() {
+        _wishlistedPinIds = data.map((item) => item['pin_catalog_id'].toString()).toSet();
+      });
     } catch (e) {
-      print("Error fetching uncategorized pins: $e");
-      if (mounted) {
-        setState(() {
-          _error = "Failed to load uncategorized pins.";
-          _isLoading = false;
-        });
-      }
+      print("Error fetching wishlist on details page: $e");
     }
   }
 
+  Future<void> _toggleWishlist(DisplayPinInSet pin) async {
+    if (_currentUserId == null) {
+      _showSnackBar("You need to be logged in to manage your wishlist.", isError: true);
+      return;
+    }
+    
+    final isCurrentlyWishlisted = _wishlistedPinIds.contains(pin.displayId);
+    final catalogPinIdAsInt = int.tryParse(pin.displayId);
+    
+    if (catalogPinIdAsInt == null) {
+      _showSnackBar("Invalid pin ID for wishlist.", isError: true);
+      return;
+    }
+
+    // Optimistic UI update
+    setState(() {
+      if (isCurrentlyWishlisted) {
+        _wishlistedPinIds.remove(pin.displayId);
+      } else {
+        _wishlistedPinIds.add(pin.displayId);
+      }
+    });
+
+    try {
+      if (isCurrentlyWishlisted) {
+        await supabase.from('user_wishlist').delete().match({'user_id': _currentUserId!, 'pin_catalog_id': catalogPinIdAsInt});
+        _showSnackBar("'${pin.name}' removed from wishlist.");
+      } else {
+        await supabase.from('user_wishlist').insert({'user_id': _currentUserId!, 'pin_catalog_id': catalogPinIdAsInt});
+        _showSnackBar("'${pin.name}' added to wishlist!");
+      }
+    } catch (e) {
+      print("Error toggling wishlist: $e");
+      // Revert UI on error
+      setState(() {
+        if (isCurrentlyWishlisted) {
+          _wishlistedPinIds.add(pin.displayId);
+        } else {
+          _wishlistedPinIds.remove(pin.displayId);
+        }
+      });
+      _showSnackBar("Error updating wishlist: ${e.toString()}", isError: true);
+    }
+  }
+
+  Future<void> _removePinFromCollection(DisplayPinInSet pin) async {
+    if (_currentUserId == null) {
+      _showSnackBar("You must be logged in to remove pins.", isError: true);
+      return;
+    }
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Confirm Removal'),
+          content: Text('Are you sure you want to remove "${pin.name}" from your collection?'),
+          actions: <Widget>[
+            TextButton(
+              child: const Text('Cancel'),
+              onPressed: () => Navigator.of(context).pop(false),
+            ),
+            TextButton(
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              child: const Text('Remove'),
+              onPressed: () => Navigator.of(context).pop(true),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirm != true) return;
+
+    try {
+      final userId = _currentUserId!;
+      final catalogPinId = int.tryParse(pin.displayId);
+
+      if (catalogPinId == null) {
+        throw 'Invalid Pin ID';
+      }
+
+      await supabase
+          .from('pins')
+          .delete()
+          .match({
+            'user_id': userId,
+            'catalog_pin_ref_id': catalogPinId,
+          });
+
+      if (mounted) {
+        setState(() {
+          pin.isOwned = false;
+          if (widget.set.isComplete) {
+            widget.set.isComplete = false;
+            _animationController.reverse();
+          }
+        });
+        _showSnackBar("'${pin.name}' removed from your collection.");
+      }
+    } catch (e) {
+      print('Error removing pin: $e');
+      _showSnackBar("Failed to remove pin: ${e.toString()}", isError: true);
+    }
+  }
+
+  Future<void> _addPinToCollection(DisplayPinInSet pin) async {
+    if (_currentUserId == null) {
+      _showSnackBar("You must be logged in to add pins.", isError: true);
+      return;
+    }
+
+    try {
+      final userId = _currentUserId!;
+      final catalogPinId = int.tryParse(pin.displayId);
+
+      if (catalogPinId == null) {
+        throw 'Invalid Pin ID';
+      }
+
+      final pinCatalogData = await supabase
+          .from('all_pins_catalog')
+          .select()
+          .eq('id', catalogPinId)
+          .single();
+
+      await supabase.from('pins').insert({
+        'user_id': userId,
+        'name': pinCatalogData['name'],
+        'image_url': pinCatalogData['image_url'],
+        'catalog_pin_ref_id': catalogPinId,
+        'set_id': widget.set.id,
+      });
+
+      if (mounted) {
+        setState(() {
+          pin.isOwned = true;
+          final allOwned = _pinsInThisSet.every((p) => p.isOwned);
+          if (allOwned) {
+            widget.set.isComplete = true;
+            _animationController.forward();
+          }
+        });
+        _showSnackBar("${pin.name} added to your collection!", isError: false);
+      }
+    } catch (e) {
+      print('Error adding pin: $e');
+      _showSnackBar("Failed to add pin: ${e.toString()}", isError: true);
+    }
+  }
+
+  void _showSnackBar(String message, {bool isError = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: isError ? Colors.red : Colors.green,
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text("My Set"), // Changed AppBar title
-        backgroundColor: const Color(0xFF3d4895), // Applied custom AppBar color
-        titleTextStyle: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w500), // Ensure title text is visible
-        iconTheme: const IconThemeData(color: Colors.white), // Ensure back button is visible
+        title: const Text("Set Details"),
+        backgroundColor: const Color(0xFF3d4895),
+        titleTextStyle: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w500),
+        iconTheme: const IconThemeData(color: Colors.white),
       ),
-      body: Column( // Added Column to place set name above the grid
+      body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Text(
-              widget.set.name, // Display actual set name
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.bold,
-                color: const Color(0xFF3d4895), // Using the same blue for consistency
-              ),
+          _buildHeader(context),
+          Expanded(
+            child: _buildContentView(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHeader(BuildContext context) {
+    final theme = Theme.of(context);
+    final int ownedPins = _pinsInThisSet.where((p) => p.isOwned).length;
+    final int totalPins = _pinsInThisSet.length;
+
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            widget.set.name,
+            style: theme.textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.bold,
+              color: Colors.grey[850],
             ),
           ),
-          Expanded( // GridView needs to be in an Expanded widget within a Column
-            child: _buildContentView(),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              if (widget.set.isComplete)
+                FadeTransition(
+                  opacity: _fadeAnimation,
+                  child: Tooltip(
+                    message: 'Set Complete!',
+                    child: Container(
+                      margin: const EdgeInsets.only(right: 8.0),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.green.withOpacity(0.6),
+                            blurRadius: 8.0,
+                            spreadRadius: 2.0,
+                          ),
+                        ],
+                      ),
+                      child: const Icon(
+                        Icons.auto_awesome,
+                        color: Colors.white,
+                        size: 16,
+                      ),
+                    ),
+                  ),
+                ),
+              if (widget.set.originalCatalogSetId != null)
+                Text(
+                  '$ownedPins/$totalPins Collected',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: widget.set.isComplete ? Colors.green[700] : Colors.grey[600],
+                    fontWeight: widget.set.isComplete ? FontWeight.bold : FontWeight.normal,
+                  ),
+                )
+              else
+                Text(
+                  '$totalPins ${totalPins == 1 ? "Pin" : "Pins"}',
+                  style: theme.textTheme.bodyMedium?.copyWith(color: Colors.grey[600]),
+                ),
+            ],
           ),
         ],
       ),
@@ -130,18 +338,18 @@ class _SetDetailsPageState extends State<SetDetailsPage> {
       return Center(child: Text(widget.isUncategorizedSet ? "No uncategorized pins found." : "No pins in this set."));
     }
 
-    // Display pins in a grid, similar to MyPinsView or PinCatalogPage
     return GridView.builder(
-      padding: const EdgeInsets.fromLTRB(12.0, 0, 12.0, 12.0), // Adjusted padding
+      padding: const EdgeInsets.fromLTRB(12.0, 0, 12.0, 12.0),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3, // Adjust as needed
-        childAspectRatio: 0.7, // Adjust as needed
+        crossAxisCount: 3,
+        childAspectRatio: 0.7, 
         crossAxisSpacing: 10.0,
         mainAxisSpacing: 10.0,
       ),
       itemCount: _pinsInThisSet.length,
       itemBuilder: (context, index) {
         final pinDisplay = _pinsInThisSet[index];
+
         Widget imageWidget = Image.network(
           pinDisplay.imageUrl,
           fit: BoxFit.contain,
@@ -153,23 +361,54 @@ class _SetDetailsPageState extends State<SetDetailsPage> {
               const Icon(Icons.broken_image, size: 40, color: Colors.grey),
         );
 
-        // Removed the ColorFiltered widget block that applied greyscale
-        // Now, all pins will display their images normally.
-
         return Card(
           clipBehavior: Clip.antiAlias,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Expanded(
-                child: Container(
-                  padding: const EdgeInsets.all(4.0),
-                  color: Colors.grey[200], // Background for the image
-                  child: imageWidget,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    // --- Image with conditional greyscale ---
+                    pinDisplay.isOwned
+                        ? imageWidget
+                        : ColorFiltered(
+                            colorFilter: const ColorFilter.matrix([
+                              0.2126, 0.7152, 0.0722, 0, 0,
+                              0.2126, 0.7152, 0.0722, 0, 0,
+                              0.2126, 0.7152, 0.0722, 0, 0,
+                              0,      0,      0,      1, 0,
+                            ]),
+                            child: Opacity(opacity: 0.6, child: imageWidget),
+                          ),
+                    // --- "COLLECTED" / "MISSING" Banner ---
+                    if (widget.set.originalCatalogSetId != null)
+                      Positioned(
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 2),
+                          color: pinDisplay.isOwned
+                              ? Colors.green.withOpacity(0.8)
+                              : Colors.red.withOpacity(0.8),
+                          child: Text(
+                            pinDisplay.isOwned ? 'COLLECTED' : 'MISSING',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.all(6.0),
+                padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 4.0),
                 child: Text(
                   pinDisplay.name,
                   textAlign: TextAlign.center,
@@ -178,23 +417,60 @@ class _SetDetailsPageState extends State<SetDetailsPage> {
                   style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
                 ),
               ),
-              if (widget.set.originalCatalogSetId != null) // Show status only for catalog sets
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 4.0),
-                  child: Text(
-                    pinDisplay.isOwned ? "Owned" : "Missing",
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 10,
-                      color: pinDisplay.isOwned ? Colors.green : Colors.red,
-                      fontWeight: FontWeight.bold
-                    ),
-                  ),
-                )
+              if (widget.set.originalCatalogSetId != null)
+                _buildPinStatus(pinDisplay),
             ],
           ),
         );
       },
+    );
+  }
+
+  Widget _buildPinStatus(DisplayPinInSet pin) {
+    final bool isWishlisted = _wishlistedPinIds.contains(pin.displayId);
+    return SizedBox(
+      height: 36, 
+      child: Center(
+        child: pin.isOwned
+            ? Tooltip(
+                message: 'Remove from Collection',
+                child: IconButton(
+                  icon: Icon(Icons.library_add_check, color: Theme.of(context).primaryColor),
+                  iconSize: 24,
+                  padding: EdgeInsets.zero,
+                  onPressed: () => _removePinFromCollection(pin),
+                ),
+              )
+            : Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                Tooltip(
+                  message: isWishlisted ? 'Remove from Wishlist' : 'Add to Wishlist',
+                  child: IconButton(
+                    icon: Icon(
+                      isWishlisted ? Icons.favorite : Icons.favorite_border,
+                      color: isWishlisted ? Colors.red.shade400 : Colors.grey[700],
+                    ),
+                    iconSize: 22,
+                    padding: EdgeInsets.zero,
+                    onPressed: () => _toggleWishlist(pin),
+                  ),
+                ),
+                Tooltip(
+                  message: 'Add to My Collection',
+                  child: IconButton(
+                    icon: Icon(
+                      Icons.library_add_outlined,
+                      color: Colors.grey[700],
+                    ),
+                    iconSize: 22,
+                    padding: EdgeInsets.zero,
+                    onPressed: () => _addPinToCollection(pin),
+                  ),
+                ),
+              ],
+            ),
+      ),
     );
   }
 }
