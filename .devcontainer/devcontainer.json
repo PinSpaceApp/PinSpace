@@ -1,0 +1,18 @@
+{
+    "name": "PinSpace Flutter Environment",
+    "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+    "features": {
+        "ghcr.io/devcontainers/features/dart:1": {
+            "version": "latest"
+        }
+    },
+    "postCreateCommand": "flutter precache && cd pinspace_app && flutter pub get",
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "Dart-Code.flutter",
+                "Dart-Code.dart-code"
+            ]
+        }
+    }
+}
