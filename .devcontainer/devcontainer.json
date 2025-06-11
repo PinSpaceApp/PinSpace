@@ -1,44 +1,13 @@
 {
-	"name": "PinSpace Flutter Environment (Pre-built)",
-	"image": "cirrusci/flutter:stable",
-
-	"customizations": {
-		"vscode": {
-			"extensions": [
-				"Dart-Code.flutter",
-				"Dart-Code.dart-code"
-			]
-		}
-	},
-	"postCreateCommand": "cd pinspace_app && flutter pub get"
-}
-EOFcat << EOF > .devcontainer/devcontainer.json
-{
-	"name": "PinSpace Flutter Environment (Pre-built)",
-	"image": "cirrusci/flutter:stable",
-
-	"customizations": {
-		"vscode": {
-			"extensions": [
-				"Dart-Code.flutter",
-				"Dart-Code.dart-code"
-			]
-		}
-	},
-	"postCreateCommand": "cd pinspace_app && flutter pub get"
-}
-EOFcat << EOF > .devcontainer/devcontainer.json
-{
-	"name": "PinSpace Flutter Environment (Pre-built)",
-	"image": "cirrusci/flutter:stable",
-
-	"customizations": {
-		"vscode": {
-			"extensions": [
-				"Dart-Code.flutter",
-				"Dart-Code.dart-code"
-			]
-		}
-	},
-	"postCreateCommand": "cd pinspace_app && flutter pub get"
+    "name": "PinSpace Flutter Environment",
+    "image": "cirrusci/flutter:stable",
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "Dart-Code.flutter",
+                "Dart-Code.dart-code"
+            ]
+        }
+    },
+    "postCreateCommand": "cd pinspace_app && flutter pub get"
 }
