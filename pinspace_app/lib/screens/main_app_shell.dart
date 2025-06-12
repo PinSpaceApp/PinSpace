@@ -8,17 +8,17 @@ import 'scanner_page.dart';
 import 'community_page.dart';
 import 'marketplace_page.dart';
 import 'settings_page.dart';
-import 'user_profile_page.dart'; 
-import 'search_results_page.dart'; 
-import 'pin_catalog_page.dart'; 
+import 'user_profile_page.dart';
+import 'search_results_page.dart';
+import 'pin_catalog_page.dart';
+import 'park_map_selection_page.dart'; // ✨ 1. IMPORT THE NEW SELECTION PAGE
 
 final supabase = Supabase.instance.client;
 
-const Color appPrimaryColor = Color(0xFF30479b); 
+const Color appPrimaryColor = Color(0xFF30479b);
 
 // Enum for Popup Menu Actions
 enum ProfileMenuAction { myProfile, myMarket, myTrophies, settings, logout }
-
 
 class MainAppShell extends StatefulWidget {
   const MainAppShell({super.key});
@@ -63,7 +63,7 @@ class _MainAppShellState extends State<MainAppShell> {
 
     _searchController.addListener(() {
       if (mounted) {
-        setState(() {}); 
+        setState(() {});
       }
     });
   }
@@ -90,17 +90,17 @@ class _MainAppShellState extends State<MainAppShell> {
           });
         } else if (mounted) {
           setState(() {
-            _userAvatarUrl = null; 
+            _userAvatarUrl = null;
             _isLoadingAvatar = false;
           });
         }
       } else {
-         if (mounted) {
+        if (mounted) {
           setState(() {
             _userAvatarUrl = null;
             _isLoadingAvatar = false;
           });
-         }
+        }
       }
     } catch (e) {
       print('Error fetching user profile for avatar: $e');
@@ -117,13 +117,13 @@ class _MainAppShellState extends State<MainAppShell> {
   void _onItemTapped(int index) {
     // Ensure index is within bounds before attempting to jump
     if (index >= 0 && index < _widgetOptions.length) {
-        setState(() {
+      setState(() {
         _selectedIndex = index;
         _pageController.jumpToPage(index);
-        });
+      });
     } else {
-        print("Error: Invalid page index $index requested for navigation.");
-        // Optionally, navigate to a default/error page or show a message
+      print("Error: Invalid page index $index requested for navigation.");
+      // Optionally, navigate to a default/error page or show a message
     }
   }
 
@@ -144,8 +144,8 @@ class _MainAppShellState extends State<MainAppShell> {
         Navigator.push(
             context,
             MaterialPageRoute(
-                builder: (context) => const UserProfilePage(initialTabIndex: 0), 
-                settings: const RouteSettings(name: MainAppShell.userProfileRouteName),
+              builder: (context) => const UserProfilePage(initialTabIndex: 0),
+              settings: const RouteSettings(name: MainAppShell.userProfileRouteName),
             )
         ).then((_) {
           if (mounted) {
@@ -154,29 +154,29 @@ class _MainAppShellState extends State<MainAppShell> {
         });
         break;
       case ProfileMenuAction.myMarket:
-        if (_selectedIndex != 3) { 
+        if (_selectedIndex != 3) {
           _onItemTapped(3); // Index for MarketplacePage
         }
         break;
       case ProfileMenuAction.myTrophies:
         Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => const UserProfilePage(initialTabIndex: 4), 
-            settings: const RouteSettings(name: MainAppShell.userProfileRouteName),
-          )
+            context,
+            MaterialPageRoute(
+              builder: (context) => const UserProfilePage(initialTabIndex: 4),
+              settings: const RouteSettings(name: MainAppShell.userProfileRouteName),
+            )
         ).then((_){
-            if (mounted) {
+          if (mounted) {
             setState(() {});
           }
         });
         break;
       case ProfileMenuAction.settings:
         Navigator.push(context, MaterialPageRoute(builder: (context) => const SettingsPage()))
-        .then((_){
-            if (mounted) {
-            _fetchUserProfileAvatar(); 
-            setState(() {}); 
+            .then((_){
+          if (mounted) {
+            _fetchUserProfileAvatar();
+            setState(() {});
           }
         });
         break;
@@ -193,22 +193,22 @@ class _MainAppShellState extends State<MainAppShell> {
         Navigator.of(context).pushNamedAndRemoveUntil('/authGate', (route) => false);
       }
     } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("Failed to log out: $e"), backgroundColor: Colors.red),
-          );
-        }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Failed to log out: $e"), backgroundColor: Colors.red),
+        );
+      }
     }
   }
 
   void _onTopIconPressed(String iconName) {
     print('$iconName icon pressed!');
     if (iconName == 'Catalog') {
-        Navigator.push(context, MaterialPageRoute(builder: (context) => const PinCatalogPage()));
+      Navigator.push(context, MaterialPageRoute(builder: (context) => const PinCatalogPage()));
     } else if (iconName == 'Notifications') {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Notifications page coming soon!")));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Notifications page coming soon!")));
     } else if (iconName == 'Messages') {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Messages page coming soon!")));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Messages page coming soon!")));
     }
   }
 
@@ -220,10 +220,10 @@ class _MainAppShellState extends State<MainAppShell> {
           builder: (context) => SearchResultsPage(searchQuery: query.trim()),
         ),
       ).then((_) {
-          if (mounted) {
-            setState(() {}); 
-          }
-        });
+        if (mounted) {
+          setState(() {});
+        }
+      });
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Please enter something to search.")),
@@ -235,7 +235,7 @@ class _MainAppShellState extends State<MainAppShell> {
   @override
   void dispose() {
     _pageController.dispose();
-    _searchController.removeListener(() { if (mounted) setState(() {}); }); 
+    _searchController.removeListener(() { if (mounted) setState(() {}); });
     _searchController.dispose();
     _authStateSubscription.cancel();
     super.dispose();
@@ -247,7 +247,7 @@ class _MainAppShellState extends State<MainAppShell> {
     final safeAreaTopPadding = MediaQuery.of(context).padding.top;
 
     const double standardAppBarHeight = kToolbarHeight;
-    const double extraAppBarHeight = 24.0; 
+    const double extraAppBarHeight = 24.0;
     const double totalAppBarAreaHeight = standardAppBarHeight + extraAppBarHeight;
     const double searchBarHeight = 48.0;
 
@@ -255,24 +255,24 @@ class _MainAppShellState extends State<MainAppShell> {
 
     final ModalRoute<dynamic>? currentRoute = ModalRoute.of(context);
     final bool isUserProfilePageActive = currentRoute?.settings.name == MainAppShell.userProfileRouteName;
-    
+
     bool isSearchResultsPageActive = false;
     if (currentRoute is MaterialPageRoute) {
-        try {
-            final widget = currentRoute.builder(context);
-            if (widget is SearchResultsPage) {
-                isSearchResultsPageActive = true;
-            }
-        } catch (e) {
-            print("Error checking route type for SearchResultsPage: $e");
+      try {
+        final widget = currentRoute.builder(context);
+        if (widget is SearchResultsPage) {
+          isSearchResultsPageActive = true;
         }
+      } catch (e) {
+        print("Error checking route type for SearchResultsPage: $e");
+      }
     }
-    
+
     bool isPinCatalogPageActive = false;
     if (currentRoute is MaterialPageRoute) {
       try {
         final widget = currentRoute.builder(context);
-        if (widget is PinCatalogPage) { 
+        if (widget is PinCatalogPage) {
           isPinCatalogPageActive = true;
         }
       } catch (e) {
@@ -281,14 +281,14 @@ class _MainAppShellState extends State<MainAppShell> {
     }
 
     final bool shouldShowShellAppBarAndSearch = !isUserProfilePageActive && !isSearchResultsPageActive && !isPinCatalogPageActive;
-    
+
     final double pageViewTopWhenShellAppBarVisible = safeAreaTopPadding + totalAppBarAreaHeight + (searchBarHeight / 2) + 8.0;
     final double pageViewTop = shouldShowShellAppBarAndSearch
         ? pageViewTopWhenShellAppBarVisible
-        : 0; 
+        : 0;
 
     return Scaffold(
-      extendBodyBehindAppBar: true, 
+      extendBodyBehindAppBar: true,
       body: Stack(
         children: [
           Positioned.fill(
@@ -305,22 +305,33 @@ class _MainAppShellState extends State<MainAppShell> {
           if (shouldShowShellAppBarAndSearch)
             Positioned(
               top: 0, left: 0, right: 0,
-              height: safeAreaTopPadding + totalAppBarAreaHeight, 
+              height: safeAreaTopPadding + totalAppBarAreaHeight,
               child: Container(color: customAppBarColor),
             ),
 
           if (shouldShowShellAppBarAndSearch)
             Positioned(
               top: safeAreaTopPadding, left: 0, right: 0,
-              height: totalAppBarAreaHeight, 
+              height: totalAppBarAreaHeight,
               child: AppBar(
-                backgroundColor: Colors.transparent, 
-                foregroundColor: Colors.white, 
-                elevation: 0, 
+                backgroundColor: Colors.transparent,
+                foregroundColor: Colors.white,
+                elevation: 0,
                 title: Text(_getAppBarTitle(_selectedIndex), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 22)),
                 actions: [
+                  // ✨ 2. ADD THE NEW MAP ICON BUTTON HERE
                   IconButton(
-                    icon: const Icon(Icons.auto_stories_outlined), 
+                    icon: const Icon(Icons.map_outlined),
+                    tooltip: 'Park Maps',
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (context) => const ParkMapSelectionPage()),
+                      );
+                    },
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.auto_stories_outlined),
                     tooltip: 'Pin Catalog',
                     onPressed: () => _onTopIconPressed('Catalog'),
                   ),
@@ -328,15 +339,15 @@ class _MainAppShellState extends State<MainAppShell> {
                   IconButton(icon: const Icon(Icons.message_outlined), tooltip: 'Messages', onPressed: () => _onTopIconPressed('Messages')),
                   PopupMenuButton<ProfileMenuAction>(
                     onSelected: _handleProfileMenuSelection,
-                    offset: const Offset(0, kToolbarHeight - 10), 
-                    icon: _isLoadingAvatar 
+                    offset: const Offset(0, kToolbarHeight - 10),
+                    icon: _isLoadingAvatar
                         ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                         : CircleAvatar(
-                            radius: 16, 
-                            backgroundColor: Colors.white.withOpacity(0.3), 
-                            backgroundImage: _userAvatarUrl != null && _userAvatarUrl!.isNotEmpty ? NetworkImage(_userAvatarUrl!) : null,
-                            child: (_userAvatarUrl == null || _userAvatarUrl!.isEmpty) ? const Icon(Icons.person_outline, size: 22, color: Colors.white) : null,
-                          ),
+                      radius: 16,
+                      backgroundColor: Colors.white.withOpacity(0.3),
+                      backgroundImage: _userAvatarUrl != null && _userAvatarUrl!.isNotEmpty ? NetworkImage(_userAvatarUrl!) : null,
+                      child: (_userAvatarUrl == null || _userAvatarUrl!.isEmpty) ? const Icon(Icons.person_outline, size: 22, color: Colors.white) : null,
+                    ),
                     itemBuilder: (BuildContext context) => <PopupMenuEntry<ProfileMenuAction>>[
                       const PopupMenuItem<ProfileMenuAction>(
                         value: ProfileMenuAction.myProfile,
@@ -346,7 +357,7 @@ class _MainAppShellState extends State<MainAppShell> {
                         value: ProfileMenuAction.myMarket,
                         child: ListTile(leading: Icon(Icons.store_mall_directory_outlined), title: Text('My Market')),
                       ),
-                        const PopupMenuItem<ProfileMenuAction>( 
+                      const PopupMenuItem<ProfileMenuAction>(
                         value: ProfileMenuAction.myTrophies,
                         child: ListTile(leading: Icon(Icons.emoji_events_outlined), title: Text('My Trophies')),
                       ),
@@ -366,15 +377,15 @@ class _MainAppShellState extends State<MainAppShell> {
                 ],
               ),
             ),
-          
+
           if (shouldShowShellAppBarAndSearch)
             Positioned(
-              top: safeAreaTopPadding + totalAppBarAreaHeight - (searchBarHeight / 2), 
+              top: safeAreaTopPadding + totalAppBarAreaHeight - (searchBarHeight / 2),
               left: 16.0, right: 16.0, height: searchBarHeight,
               child: Container(
                 decoration: BoxDecoration(
-                  color: theme.cardColor, 
-                  borderRadius: BorderRadius.circular(searchBarHeight / 2), 
+                  color: theme.cardColor,
+                  borderRadius: BorderRadius.circular(searchBarHeight / 2),
                   boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 6, offset: const Offset(0, 3))],
                 ),
                 child: TextField(
@@ -386,8 +397,8 @@ class _MainAppShellState extends State<MainAppShell> {
                     suffixIcon: _searchController.text.isNotEmpty
                         ? IconButton(icon: Icon(Icons.clear, color: theme.iconTheme.color?.withOpacity(0.8), size: 20), onPressed: () => _searchController.clear(), tooltip: 'Clear search')
                         : IconButton(icon: Icon(Icons.filter_list, color: theme.iconTheme.color?.withOpacity(0.8), size: 20), onPressed: () { print("Filter tapped"); }, tooltip: 'Filter'),
-                    border: InputBorder.none, 
-                    contentPadding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 5.0), 
+                    border: InputBorder.none,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 5.0),
                   ),
                   style: TextStyle(color: theme.textTheme.bodyLarge?.color, fontSize: 14),
                   onSubmitted: _onSearchSubmitted,
@@ -398,7 +409,7 @@ class _MainAppShellState extends State<MainAppShell> {
         ],
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: _onScannerButtonPressed, tooltip: 'Scan Pin', backgroundColor: customAppBarColor, 
+        onPressed: _onScannerButtonPressed, tooltip: 'Scan Pin', backgroundColor: customAppBarColor,
         foregroundColor: Colors.white, elevation: 4.0, shape: const CircleBorder(),
         child: const Icon(Icons.camera, size: 30.0),
       ),
@@ -408,7 +419,7 @@ class _MainAppShellState extends State<MainAppShell> {
         child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: <Widget>[
           _buildBottomNavItem(icon: Icons.dashboard_outlined, activeIcon: Icons.dashboard, label: 'Dashboard', index: 0),
           _buildBottomNavItem(icon: Icons.style_outlined, activeIcon: Icons.style, label: 'My Pins', index: 1),
-          const SizedBox(width: 48), 
+          const SizedBox(width: 48),
           _buildBottomNavItem(icon: Icons.people_outline, activeIcon: Icons.people, label: 'Community', index: 2),
           _buildBottomNavItem(icon: Icons.storefront_outlined, activeIcon: Icons.storefront, label: 'Pin Market', index: 3),
         ]),
@@ -426,11 +437,10 @@ class _MainAppShellState extends State<MainAppShell> {
   String _getAppBarTitle(int index) {
     switch (index) {
       case 0: return 'Dashboard';
-      case 1: return 'My Collection'; 
+      case 1: return 'My Collection';
       case 2: return 'Community';
       case 3: return 'Pin Market';
       default: return 'PinSpace';
     }
   }
 }
-
