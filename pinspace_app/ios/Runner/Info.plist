@@ -45,5 +45,12 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+<string>PinSpace needs camera access to let you take and upload photos for your pins.</string>
+<key>NSLocationWhenInUseUsageDescription</key>
+<string>PinSpace needs your location when the app is open to show nearby pins and help you create new ones.</string>
+<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+<string>PinSpace needs your location in the background to notify you about pins near your current position, even when the app is closed.</string>
+<key>NSPhotoLibraryUsageDescription</key><string>PinSpace needs photo library access to let you select images for pins.</string>
 </dict>
 </plist>
