@@ -1,6 +1,7 @@
 workflows:
   ios-release:
     name: iOS App Store Build
+    working_directory: pinspace_app  # Add this line
     max_build_duration: 120
     integrations:
       app_store_connect: default  # This must match the name you gave your API key in the Codemagic UI
