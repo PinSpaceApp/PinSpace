@@ -3,7 +3,7 @@ workflows:
     name: iOS App Store Build
     max_build_duration: 120
     integrations:
-      app_store_connect: default  # Or your API key name
+      app_store_connect: default  # This must match the name you gave your API key in the Codemagic UI
     environment:
       vars:
         APP_STORE_APPLE_ID: "6748885422"  # Your app's Apple ID
@@ -24,4 +24,5 @@ workflows:
       - /tmp/xcodebuild_logs/*.log
     publishing:
       app_store_connect:
-        submit_to_app_store: true  # Or submit_to_testflight: true
+        auth: integration  # This fixes the authentication error by using your UI-configured API key
+        submit_to_app_store: true  # Set to true for App Store submission; use submit_to_testflight: true for TestFlight
