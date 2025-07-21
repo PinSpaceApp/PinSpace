@@ -50,6 +50,7 @@ dependencies:
   google_maps_flutter: ^2.12.2
 
 dev_dependencies:
+  flutter_launcher_icons: ^0.14.0
   flutter_test:
     sdk: flutter
 
@@ -75,6 +76,10 @@ flutter:
   # Make sure the .env file exists in the root of pinspace_app/
   assets:
     - assets/images/ 
+
+flutter_launcher_icons:
+  ios: true
+  image_path_ios: "assets/icon/icon.png"
 
   # Example asset lines (keep commented out unless needed):
   #  - images/a_dot_burr.jpeg
