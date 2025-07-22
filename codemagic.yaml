@@ -1,13 +1,13 @@
 workflows:
   ios-release:
     name: iOS App Store Build
-    working_directory: pinspace_app  # Add this line
+    working_directory: pinspace_app  # Runs scripts from your project subdirectory
     max_build_duration: 120
     integrations:
-      app_store_connect: default  # This must match the name you gave your API key in the Codemagic UI
+      app_store_connect: PinSpace App Stpre Connect Key  # Match your API key name in Codemagic UI > Teams > Integrations
     environment:
       vars:
-        APP_STORE_APPLE_ID: "6748885422"  # Your app's Apple ID
+        APP_STORE_APPLE_ID: "6748885422"  # Your app's Apple ID from App Store Connect
       flutter: stable
       ios_signing:
         distribution_type: app_store
@@ -16,14 +16,11 @@ workflows:
       - flutter pub get
       - cd ios && pod install
       - xcode-project use-profiles
-      - name: Increment build number
-        script: |
-          BUILD_NUMBER=$(($(app-store-connect get-latest-app-store-build-number "$APP_STORE_APPLE_ID") + 1))
-      - flutter build ipa --release --build-number=$BUILD_NUMBER --export-options-plist=/Users/builder/export_options.plist
+      - flutter build ipa --release --export-options-plist=/Users/builder/export_options.plist --dart-define=SUPABASE_URL=$SUPABASE_URL --dart-define=SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
     publishing:
       app_store_connect:
-        auth: integration  # This fixes the authentication error by using your UI-configured API key
-        submit_to_app_store: true  # Set to true for App Store submission; use submit_to_testflight: true for TestFlight
+        auth: integration  # Uses your UI-configured API key
+        submit_to_app_store: true  # Or submit_to_testflight: true for testing
