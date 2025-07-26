@@ -4,12 +4,11 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_staggered_animations/flutter_staggered_animations.dart';
 import 'package:shimmer/shimmer.dart';
 
-import '../models/profile.dart'; 
-// Assuming Pin and PinStatus are defined in user_profile_page.dart or a shared models file
+import '../models/profile.dart';
 import 'user_profile_page.dart' show UserProfilePage, Pin, PinStatus;
 
 
-import 'my_pins_page.dart' hide Pin, PinStatus; // Hide if it also defines Pin to avoid conflict
+import 'my_pins_page.dart' hide Pin, PinStatus;
 
 import 'scanner_page.dart';
 import 'marketplace_page.dart';
@@ -18,7 +17,7 @@ import 'pin_catalog_page.dart';
 
 final supabase = Supabase.instance.client;
 
-const String kMagicalFont = 'Poppins'; 
+const String kMagicalFont = 'Poppins';
 
 const Color kMainAppColor = Color(0xFF30479B);
 const Color kSecondaryAppColor = Color(0xFFFFC107);
@@ -54,7 +53,6 @@ class CatalogSet {
   CatalogSet({required this.id, required this.name, required this.pinImageUrls});
 
   factory CatalogSet.fromMap(Map<String, dynamic> map) {
-    // Safely parse the list of image URLs from the function's result
     final imageUrlsData = map['pin_image_urls'] as List<dynamic>?;
     final imageUrls = imageUrlsData?.map((item) => item.toString()).toList() ?? [];
 
@@ -76,13 +74,13 @@ class DashboardPage extends StatefulWidget {
   State<DashboardPage> createState() => _DashboardPageState();
 }
 
-class _DashboardPageState extends State<DashboardPage> with SingleTickerProviderStateMixin { 
+class _DashboardPageState extends State<DashboardPage> with SingleTickerProviderStateMixin {
   Profile? _userProfile;
   bool _isLoadingProfile = true;
   String? _profileError;
 
   int _myCollectionCount = 0;
-  int _mySetCount = 0; 
+  int _mySetCount = 0;
   int _forTradeCount = 0;
   int _wishlistCount = 0;
   int _myTrophiesCount = 0;
@@ -98,7 +96,7 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
   @override
   void initState() {
     super.initState();
-    
+
     _greetingAnimationController = AnimationController(
       duration: const Duration(milliseconds: 800),
       vsync: this,
@@ -118,7 +116,7 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
 
   Future<void> _fetchAllDashboardData() async {
     await _fetchUserProfileAndStats();
-    await _fetchNewestSets(); 
+    await _fetchNewestSets();
   }
 
   Future<void> _fetchUserProfileAndStats() async {
@@ -139,7 +137,7 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
           _isLoadingStats = false;
           _profileError = "Not logged in.";
         });
-        _greetingAnimationController.forward(); 
+        _greetingAnimationController.forward();
       }
       return;
     }
@@ -161,33 +159,33 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
       }
       if (mounted) {
         setState(() => _isLoadingProfile = false);
-        _greetingAnimationController.forward(); 
+        _greetingAnimationController.forward();
       }
 
       final pinCountResponse = await supabase
           .from('pins')
-          .select('id') 
+          .select('id')
           .eq('user_id', user.id)
           .count(CountOption.exact);
       _myCollectionCount = pinCountResponse.count ?? 0;
-      
+
       final setCountResponse = await supabase
-          .from('sets') 
-          .select('id') 
+          .from('sets')
+          .select('id')
           .eq('user_id', user.id)
           .count(CountOption.exact);
       _mySetCount = setCountResponse.count ?? 0;
-      
+
       final pinsForTradeResponse = await supabase
           .from('pins')
-          .select('id, status, user_id, name') 
+          .select('id, status, user_id, name')
           .eq('user_id', user.id);
-      
+
       final List<dynamic> pinsDataForTrade = pinsForTradeResponse as List<dynamic>;
       _forTradeCount = pinsDataForTrade.where((pinMapDynamic) {
         if (pinMapDynamic is Map<String, dynamic>) {
-          try { 
-            final pin = Pin.fromMap(pinMapDynamic); 
+          try {
+            final pin = Pin.fromMap(pinMapDynamic);
             return pin.status == PinStatus.forTrade;
           } catch (e) {
             print("Error parsing pin for trade count: $e, Pin data: $pinMapDynamic");
@@ -202,21 +200,21 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
       try {
         final wishlistResponse = await supabase
             .from('wishlist')
-            .select() 
-            .eq('user_id', user.id) 
-            .count(CountOption.exact); 
-            
+            .select()
+            .eq('user_id', user.id)
+            .count(CountOption.exact);
+
         if (mounted) {
-          _wishlistCount = wishlistResponse.count ?? 0; 
+          _wishlistCount = wishlistResponse.count ?? 0;
         }
       } catch (e) {
         print("Error fetching wishlist count: $e");
       }
-      
+
       _myTrophiesCount = 0;
       try {
         final trophiesResponse = await supabase
-            .from('trophies')
+            .from('user_achievements') // Corrected table name
             .select()
             .eq('user_id', user.id)
             .count(CountOption.exact);
@@ -238,12 +236,11 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
           _isLoadingStats = false;
           _profileError = "Failed to load dashboard data. ${e.toString()}";
         });
-          _greetingAnimationController.forward(); 
+        _greetingAnimationController.forward();
       }
     }
   }
 
-  // ✨ UPDATED: This function now calls the Supabase RPC function from Step 1
   Future<void> _fetchNewestSets() async {
     if (!mounted) return;
     setState(() {
@@ -252,7 +249,6 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
     });
 
     try {
-      // Instead of .from().select(), we now call our custom function
       final response = await supabase
           .rpc('get_newest_sets_with_pin_images');
 
@@ -260,7 +256,7 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
 
       final List<dynamic> data = response as List<dynamic>;
       _newestSets = data.map((map) => CatalogSet.fromMap(map as Map<String, dynamic>)).toList();
-      
+
       setState(() => _isLoadingNewestSets = false);
 
     } catch (e, stackTrace) {
@@ -281,74 +277,74 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
     final theme = Theme.of(context);
     final primaryColor = kMainAppColor;
     final accentColor = kSecondaryAppColor;
-    final scaffoldBgColor = Colors.white; 
+    final scaffoldBgColor = Colors.white;
 
     return Scaffold(
-      backgroundColor: scaffoldBgColor, 
+      backgroundColor: scaffoldBgColor,
       body: RefreshIndicator(
-          onRefresh: _fetchAllDashboardData, 
-          color: accentColor, 
-          backgroundColor: primaryColor.withOpacity(0.8),
-          child: CustomScrollView( 
-            slivers: <Widget>[
-              SliverPadding( 
-                padding: EdgeInsets.only(
-                  top: MediaQuery.of(context).padding.top + 24.0, 
-                  left: 16.0, 
-                  right: 16.0, 
-                  bottom: 16.0
-                ),
-                sliver: SliverList(
-                  delegate: SliverChildListDelegate(
-                    [
-                      _buildGreetingSection(theme, primaryColor),
-                      const SizedBox(height: 30.0),
+        onRefresh: _fetchAllDashboardData,
+        color: accentColor,
+        backgroundColor: primaryColor.withOpacity(0.8),
+        child: CustomScrollView(
+          slivers: <Widget>[
+            SliverPadding(
+              padding: const EdgeInsets.only(
+                top: 40.0,
+                left: 16.0,
+                right: 16.0,
+                bottom: 16.0,
+              ),
+              sliver: SliverList(
+                delegate: SliverChildListDelegate(
+                  [
+                    _buildGreetingSection(theme, primaryColor),
+                    const SizedBox(height: 30.0),
 
-                      _buildSectionHeader("Your Pin Stats", theme),
-                      const SizedBox(height: 16.0),
-                      _isLoadingStats
-                          ? _buildStatsShimmer()
-                          : _buildStatsGrid(context, theme), 
-                      const SizedBox(height: 30.0),
+                    _buildSectionHeader("Your Pin Stats", theme),
+                    const SizedBox(height: 16.0),
+                    _isLoadingStats
+                        ? _buildStatsShimmer()
+                        : _buildStatsGrid(context, theme),
+                    const SizedBox(height: 30.0),
 
-                      _buildSectionHeader("Quick Actions", theme),
-                      const SizedBox(height: 16.0),
-                      _buildQuickActionsGrid(context, theme),
-                      const SizedBox(height: 30.0),
+                    _buildSectionHeader("Quick Actions", theme),
+                    const SizedBox(height: 16.0),
+                    _buildQuickActionsGrid(context, theme),
+                    const SizedBox(height: 30.0),
 
-                      _buildSectionHeader(
-                        "Newest Sets in Catalog", 
-                        theme,
-                        actionButton: TextButton(
-                          onPressed: () {
-                            Navigator.push(context, MaterialPageRoute(builder: (context) => const PinCatalogPage()));
-                          },
-                          child: Text(
-                            "View All Sets",
-                            style: TextStyle(
-                              fontFamily: kMagicalFont,
-                              fontWeight: FontWeight.w600,
-                              color: kMainAppColor,
-                              fontSize: theme.textTheme.bodyMedium?.fontSize,
-                            ),
+                    _buildSectionHeader(
+                      "Newest Sets in Catalog",
+                      theme,
+                      actionButton: TextButton(
+                        onPressed: () {
+                          Navigator.push(context, MaterialPageRoute(builder: (context) => const PinCatalogPage()));
+                        },
+                        child: Text(
+                          "View All Sets",
+                          style: TextStyle(
+                            fontFamily: kMagicalFont,
+                            fontWeight: FontWeight.w600,
+                            color: kMainAppColor,
+                            fontSize: theme.textTheme.bodyMedium?.fontSize,
                           ),
                         ),
-                      ), 
-                      const SizedBox(height: 16.0),
-                      _buildNewestSetsSection(theme), 
-                      const SizedBox(height: 30.0),
+                      ),
+                    ),
+                    const SizedBox(height: 16.0),
+                    _buildNewestSetsSection(theme),
+                    const SizedBox(height: 30.0),
 
-                      _buildSectionHeader("Community Buzz", theme),
-                      const SizedBox(height: 16.0),
-                      _buildSocialHubSection(theme),
-                      const SizedBox(height: 30.0), 
-                    ],
-                  ),
+                    _buildSectionHeader("Community Buzz", theme),
+                    const SizedBox(height: 16.0),
+                    _buildSocialHubSection(theme),
+                    const SizedBox(height: 30.0),
+                  ],
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
+      ),
     );
   }
 
@@ -359,21 +355,21 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
       children: [
         Text(
           title,
-          style: theme.textTheme.titleMedium?.copyWith( 
-            fontWeight: FontWeight.w600, 
+          style: theme.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w600,
             fontFamily: kMagicalFont,
-            color: Colors.grey.shade600, 
+            color: Colors.grey.shade600,
           ),
         ),
         if (actionButton != null) actionButton,
       ],
     );
   }
-  
+
   Widget _buildGreetingShimmer() {
     return Shimmer.fromColors(
-      baseColor: Colors.grey.shade300, 
-      highlightColor: Colors.grey.shade100, 
+      baseColor: Colors.grey.shade300,
+      highlightColor: Colors.grey.shade100,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -381,8 +377,8 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
             width: 200,
             height: 28.0,
             decoration: BoxDecoration(
-              color: Colors.white, 
-              borderRadius: BorderRadius.circular(8)
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8)
             ),
           ),
         ],
@@ -395,7 +391,7 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
       return _buildGreetingShimmer();
     }
 
-    String usernameDisplay = "Pin Collector"; 
+    String usernameDisplay = "Pin Collector";
     if (_userProfile != null) {
       if (_userProfile!.username != null && _userProfile!.username!.isNotEmpty) {
         usernameDisplay = _userProfile!.username!;
@@ -412,17 +408,17 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
       opacity: _greetingFadeAnimation,
       child: Text(
         greetingText,
-        style: theme.textTheme.headlineMedium?.copyWith( 
-          fontWeight: FontWeight.w600,
-          fontFamily: kMagicalFont,
-          color: kMainAppColor, 
-           shadows: [
-            Shadow(
-              blurRadius: 1.0, 
-              color: Colors.grey.withOpacity(0.3),
-              offset: const Offset(1.0, 1.5),
-            ),
-          ]
+        style: theme.textTheme.headlineMedium?.copyWith(
+            fontWeight: FontWeight.w600,
+            fontFamily: kMagicalFont,
+            color: kMainAppColor,
+            shadows: [
+              Shadow(
+                blurRadius: 1.0,
+                color: Colors.grey.withOpacity(0.3),
+                offset: const Offset(1.0, 1.5),
+              ),
+            ]
         ),
       ),
     );
@@ -430,22 +426,22 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
 
   Widget _buildStatsShimmer() {
     return GridView.count(
-      crossAxisCount: 2, 
+      crossAxisCount: 2,
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
       mainAxisSpacing: 16.0,
       crossAxisSpacing: 16.0,
-      childAspectRatio: 2.3, 
+      childAspectRatio: 2.3,
       children: List.generate(4, (index) => Shimmer.fromColors(
-        baseColor: Colors.grey.shade300, 
-        highlightColor: Colors.grey.shade100, 
+        baseColor: Colors.grey.shade300,
+        highlightColor: Colors.grey.shade100,
         child: Card(
           elevation: 0,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.0)),
           child: Container(
             decoration: BoxDecoration(
-              color: Colors.white, 
-              borderRadius: BorderRadius.circular(16.0)
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16.0)
             ),
           ),
         ),
@@ -453,7 +449,7 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
     );
   }
 
-  Widget _buildStatsGrid(BuildContext context, ThemeData theme) { 
+  Widget _buildStatsGrid(BuildContext context, ThemeData theme) {
     final statCardColors = [
       Colors.green.shade400,
       Colors.lightBlue.shade300,
@@ -465,13 +461,13 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
 
     final statItems = <Widget>[
       _StatCard(
-        title: "My Collection", 
-        value: myCollectionValue, 
-        icon: Icons.inventory_2_rounded, 
-        cardAccentColor: statCardColors[0], 
+        title: "My Collection",
+        value: myCollectionValue,
+        icon: Icons.inventory_2_rounded,
+        cardAccentColor: statCardColors[0],
         iconThemeColor: statCardColors[0],
-        onTap: () { 
-          widget.onNavigateRequest?.call(1); 
+        onTap: () {
+          widget.onNavigateRequest?.call(1);
         },
       ),
       _StatCard(title: "For Trade", value: _forTradeCount.toString(), icon: Icons.swap_horiz_rounded, cardAccentColor: statCardColors[1], iconThemeColor: statCardColors[1]),
@@ -481,15 +477,15 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
 
     return AnimationLimiter(
       child: GridView.count(
-        crossAxisCount: 2, 
+        crossAxisCount: 2,
         shrinkWrap: true,
         physics: const NeverScrollableScrollPhysics(),
-        mainAxisSpacing: 16.0, 
-        crossAxisSpacing: 16.0, 
-        childAspectRatio: 2.3, 
+        mainAxisSpacing: 16.0,
+        crossAxisSpacing: 16.0,
+        childAspectRatio: 2.3,
         children: List.generate(
           statItems.length,
-          (index) {
+              (index) {
             return AnimationConfiguration.staggeredGrid(
               position: index,
               duration: const Duration(milliseconds: 500),
@@ -511,22 +507,22 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
     final actionItems = [
       _ActionCardData(
         title: "Add New Pin",
-        icon: Icons.add_photo_alternate_rounded, 
+        icon: Icons.add_photo_alternate_rounded,
         onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const ScannerPage())),
       ),
       _ActionCardData(
         title: "My Collection",
-        icon: Icons.collections_bookmark_rounded, 
-        onTap: () => widget.onNavigateRequest?.call(1), 
+        icon: Icons.collections_bookmark_rounded,
+        onTap: () => widget.onNavigateRequest?.call(1),
       ),
       _ActionCardData(
         title: "Pin Market",
-        icon: Icons.store_mall_directory_rounded, 
-        onTap: () => widget.onNavigateRequest?.call(3), 
+        icon: Icons.store_mall_directory_rounded,
+        onTap: () => widget.onNavigateRequest?.call(3),
       ),
       _ActionCardData(
         title: "My Profile",
-        icon: Icons.face_retouching_natural_rounded, 
+        icon: Icons.face_retouching_natural_rounded,
         onTap: () => Navigator.push(
           context,
           MaterialPageRoute(
@@ -536,28 +532,28 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
         ),
       ),
     ];
-    
+
     return AnimationLimiter(
       child: GridView.count(
         crossAxisCount: 2,
         shrinkWrap: true,
         physics: const NeverScrollableScrollPhysics(),
-        mainAxisSpacing: 12.0, 
-        crossAxisSpacing: 12.0, 
-        childAspectRatio: 2.5, 
+        mainAxisSpacing: 12.0,
+        crossAxisSpacing: 12.0,
+        childAspectRatio: 2.5,
         children: List.generate(
           actionItems.length,
-          (index) {
+              (index) {
             final item = actionItems[index];
             return AnimationConfiguration.staggeredGrid(
               position: index,
               duration: const Duration(milliseconds: 500),
               columnCount: 2,
               child: SlideAnimation(
-                delay: Duration(milliseconds: index * 100 + 200), 
+                delay: Duration(milliseconds: index * 100 + 200),
                 verticalOffset: 50.0,
                 child: FadeInAnimation(
-                  child: _ActionCard( 
+                  child: _ActionCard(
                     title: item.title,
                     icon: item.icon,
                     onTap: item.onTap,
@@ -591,7 +587,7 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
     }
 
     return SizedBox(
-      height: 220, // Increased height to accommodate dots and wrapped text
+      height: 220,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
         itemCount: _newestSets.length,
@@ -604,8 +600,8 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
               horizontalOffset: 50.0,
               child: FadeInAnimation(
                 child: _SetDisplayCard(
-                  set: setData, 
-                  borderColor: Colors.grey.shade300, 
+                  set: setData,
+                  borderColor: Colors.grey.shade300,
                 ),
               ),
             ),
@@ -617,17 +613,17 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
 
   Widget _buildSetsShimmer() {
     return SizedBox(
-      height: 220, 
+      height: 220,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
-        itemCount: 3, 
+        itemCount: 3,
         itemBuilder: (context, index) {
           return Shimmer.fromColors(
             baseColor: Colors.grey.shade300,
             highlightColor: Colors.grey.shade100,
             child: Container(
-              width: 150, 
-              height: 200, 
+              width: 150,
+              height: 200,
               margin: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
               decoration: BoxDecoration(
                 color: Colors.white,
@@ -676,6 +672,10 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
   }
 }
 
+// ===============================================
+// WIDGET CLASSES START HERE
+// ===============================================
+
 class _ActionCardData {
   final String title;
   final IconData icon;
@@ -688,13 +688,14 @@ class _ActionCardData {
   });
 }
 
+// ✅ FIX APPLIED HERE: This is the single, corrected version of _StatCard
 class _StatCard extends StatelessWidget {
   final String title;
-  final String value; 
+  final String value;
   final IconData icon;
-  final Color cardAccentColor; 
-  final Color iconThemeColor; 
-  final VoidCallback? onTap; 
+  final Color cardAccentColor;
+  final Color iconThemeColor;
+  final VoidCallback? onTap;
 
   const _StatCard({
     required this.title,
@@ -702,73 +703,77 @@ class _StatCard extends StatelessWidget {
     required this.icon,
     required this.cardAccentColor,
     required this.iconThemeColor,
-    this.onTap, 
+    this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    
-    return Container( 
+
+    return Container(
       decoration: BoxDecoration(
-        color: Colors.white, 
-        borderRadius: BorderRadius.circular(16.0),
-        boxShadow: [ 
-          BoxShadow(
-            color: Colors.grey.withOpacity(0.25), 
-            blurRadius: 10.0, 
-            spreadRadius: 1.5, 
-            offset: const Offset(3.0, 4.0), 
-          ),
-        ],
-        border: Border.all(color: cardAccentColor.withOpacity(0.9), width: 2.0) 
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16.0),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.grey.withOpacity(0.25),
+              blurRadius: 10.0,
+              spreadRadius: 1.5,
+              offset: const Offset(3.0, 4.0),
+            ),
+          ],
+          border: Border.all(color: cardAccentColor.withOpacity(0.9), width: 2.0)
       ),
-      child: Material( 
+      child: Material(
         color: Colors.transparent,
         borderRadius: BorderRadius.circular(16.0),
         child: InkWell(
-          onTap: onTap, 
+          onTap: onTap,
           borderRadius: BorderRadius.circular(16.0),
           splashColor: iconThemeColor.withOpacity(0.2),
           highlightColor: iconThemeColor.withOpacity(0.1),
           child: Padding(
-            padding: const EdgeInsets.all(16.0), 
+            padding: const EdgeInsets.all(12.0), // Reduced padding slightly as well
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center, 
+              mainAxisAlignment: MainAxisAlignment.center,
               children: <Widget>[
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Flexible(
-                      child: Text(
-                        title,
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          fontFamily: kMagicalFont,
-                          color: cardAccentColor,
+                Flexible(
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          title,
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            fontFamily: kMagicalFont,
+                            color: cardAccentColor,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
                       ),
-                    ),
-                    Icon(icon, size: 24.0, color: iconThemeColor), 
-                  ],
+                      Icon(icon, size: 22.0, color: iconThemeColor), // Reduced icon size
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 4),
-                FittedBox( 
-                  fit: BoxFit.scaleDown,
-                  child: Text(
-                    value,
-                    style: theme.textTheme.bodyLarge?.copyWith( 
-                      fontWeight: FontWeight.bold,
-                      fontFamily: kMagicalFont,
-                      color: Colors.grey.shade700,
-                      letterSpacing: -0.2, 
+                const SizedBox(height: 2), // Reduced SizedBox height
+                Flexible(
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      value,
+                      style: theme.textTheme.bodyLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        fontFamily: kMagicalFont,
+                        color: Colors.grey.shade700,
+                        letterSpacing: -0.2,
+                      ),
+                      maxLines: 2,
+                      textAlign: TextAlign.start,
                     ),
-                    maxLines: 2, 
-                    textAlign: TextAlign.start,
                   ),
                 ),
               ],
@@ -780,6 +785,7 @@ class _StatCard extends StatelessWidget {
   }
 }
 
+// ✅ FIX APPLIED HERE: This is the single, corrected version of _ActionCard
 class _ActionCard extends StatelessWidget {
   final String title;
   final IconData icon;
@@ -796,11 +802,11 @@ class _ActionCard extends StatelessWidget {
     final theme = Theme.of(context);
 
     return Card(
-      elevation: 2.0, 
-      shadowColor: Colors.grey.withOpacity(0.5), 
+      elevation: 2.0,
+      shadowColor: Colors.grey.withOpacity(0.5),
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12.0), 
-        side: BorderSide(color: Colors.grey.shade300, width: 1), 
+        borderRadius: BorderRadius.circular(12.0),
+        side: BorderSide(color: Colors.grey.shade300, width: 1),
       ),
       color: Colors.white,
       child: InkWell(
@@ -809,23 +815,25 @@ class _ActionCard extends StatelessWidget {
         splashColor: kMainAppColor.withOpacity(0.05),
         highlightColor: kMainAppColor.withOpacity(0.02),
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 8.0), 
+          padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 8.0),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.center,
             children: <Widget>[
-              Icon(icon, size: 28.0, color: kMainAppColor), 
-              const SizedBox(height: 8.0), 
-              Text(
-                title,
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodySmall?.copyWith( 
-                  fontWeight: FontWeight.w600,
-                  fontFamily: kMagicalFont,
-                  color: kMainAppColor, 
+              Icon(icon, size: 28.0, color: kMainAppColor),
+              const SizedBox(height: 8.0),
+              Flexible(
+                child: Text(
+                  title,
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    fontFamily: kMagicalFont,
+                    color: kMainAppColor,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                 ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
               ),
             ],
           ),
@@ -867,8 +875,7 @@ class _SetDisplayCardState extends State<_SetDisplayCard> {
     _pageController.dispose();
     super.dispose();
   }
-  
-  // Helper to build the indicator dots
+
   Widget _buildPageIndicator() {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
@@ -895,7 +902,6 @@ class _SetDisplayCardState extends State<_SetDisplayCard> {
 
     Widget imageCarousel;
 
-    // Check if there are any images to display
     if (widget.set.pinImageUrls.isNotEmpty) {
       imageCarousel = Stack(
         alignment: Alignment.center,
@@ -931,7 +937,6 @@ class _SetDisplayCardState extends State<_SetDisplayCard> {
               },
             ),
           ),
-          // Left Arrow
           if (_currentPage > 0)
             Align(
               alignment: Alignment.centerLeft,
@@ -943,7 +948,6 @@ class _SetDisplayCardState extends State<_SetDisplayCard> {
                 ),
               ),
             ),
-          // Right Arrow
           if (_currentPage < widget.set.pinImageUrls.length - 1)
             Align(
               alignment: Alignment.centerRight,
@@ -958,7 +962,6 @@ class _SetDisplayCardState extends State<_SetDisplayCard> {
         ],
       );
     } else {
-      // Fallback if there are no images for the set
       imageCarousel = Container(
         width: imageWidth,
         height: imageHeight,
@@ -998,7 +1001,6 @@ class _SetDisplayCardState extends State<_SetDisplayCard> {
             ),
             if (widget.set.pinImageUrls.length > 1) _buildPageIndicator(),
             const SizedBox(height: 4),
-            // ✨ UPDATED: Text is now in a Flexible widget to allow wrapping without overflow
             Flexible(
               child: Text(
                 widget.set.name,
@@ -1009,7 +1011,6 @@ class _SetDisplayCardState extends State<_SetDisplayCard> {
                   fontSize: 13,
                 ),
                 textAlign: TextAlign.center,
-                // Removed maxLines and overflow to allow text to wrap
               ),
             ),
           ],
@@ -1023,7 +1024,7 @@ class _SocialActivityData {
   final String title;
   final String description;
   final IconData icon;
-  final Color color; 
+  final Color color;
 
   _SocialActivityData({required this.title, required this.description, required this.icon, required this.color});
 }
@@ -1035,17 +1036,17 @@ class _SocialActivityCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Card(
-      elevation: 2.0, 
-      shadowColor: Colors.grey.withOpacity(0.4), 
+      elevation: 2.0,
+      shadowColor: Colors.grey.withOpacity(0.4),
       margin: const EdgeInsets.symmetric(vertical: 6.0),
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(10.0),
-        side: BorderSide(color: data.color.withOpacity(0.3), width: 1) 
+          borderRadius: BorderRadius.circular(10.0),
+          side: BorderSide(color: data.color.withOpacity(0.3), width: 1)
       ),
-      color: Colors.white, 
+      color: Colors.white,
       child: ListTile(
         leading: CircleAvatar(
-          backgroundColor: data.color.withOpacity(0.15), 
+          backgroundColor: data.color.withOpacity(0.15),
           child: Icon(data.icon, color: data.color, size: 22),
         ),
         title: Text(
@@ -1060,7 +1061,7 @@ class _SocialActivityCard extends StatelessWidget {
           data.description,
           style: TextStyle(
             fontFamily: kMagicalFont,
-            color: kMainAppColor.withOpacity(0.7), 
+            color: kMainAppColor.withOpacity(0.7),
             fontSize: 13,
           ),
           maxLines: 2,
@@ -1068,7 +1069,6 @@ class _SocialActivityCard extends StatelessWidget {
         ),
         trailing: Icon(Icons.arrow_forward_ios_rounded, size: 16, color: data.color.withOpacity(0.6)),
         onTap: () {
-          // TODO: Navigate to relevant social item or trade details
           print("Tapped on social item: ${data.title}");
         },
       ),

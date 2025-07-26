@@ -9,24 +9,15 @@ class AppTheme {
       useMaterial3: true, // Enable Material 3 features
 
       // Define the color scheme using your palette
-      // You decide which color plays which role!
       colorScheme: ColorScheme.fromSeed(
         seedColor: AppColors.sulleyBlue, // Base color for generating scheme
         primary: AppColors.sulleyBlue,
         secondary: AppColors.mikeLime,
         tertiary: AppColors.sulleyBlue,
-        // You can override other colors too:
-        // background: AppColors.white,
-        // error: Colors.red,
-        // surface: AppColors.white,
-        // onPrimary: AppColors.white,
-        // onSecondary: AppColors.black,
-        // ... etc.
         brightness: Brightness.light, // Specify light theme
       ),
 
-      // You can customize other theme aspects too:
-      scaffoldBackgroundColor: AppColors.white, // Example
+      scaffoldBackgroundColor: AppColors.white,
 
       appBarTheme: const AppBarTheme(
         backgroundColor: AppColors.sulleyBlue, // Example AppBar color
@@ -42,8 +33,17 @@ class AppTheme {
         ),
       ),
 
-      // Define text themes if needed
-      // textTheme: const TextTheme(...)
+      // ✅ DEFINE A CONSISTENT TEXT THEME
+      textTheme: const TextTheme(
+        // For "Welcome back, Palmetto_Cole!"
+        headlineSmall: TextStyle(fontSize: 24.0, fontWeight: FontWeight.bold, color: Colors.black87),
+        // For card titles like "My Collection"
+        titleMedium: TextStyle(fontSize: 16.0, fontWeight: FontWeight.bold),
+        // For card subtitles like "11 Pins | 4 Sets"
+        bodyMedium: TextStyle(fontSize: 14.0),
+        // For labels on quick action buttons
+        labelLarge: TextStyle(fontSize: 14.0, fontWeight: FontWeight.w500),
+      ),
 
       // Define input decoration themes, etc.
       // inputDecorationTheme: const InputDecorationTheme(...)
